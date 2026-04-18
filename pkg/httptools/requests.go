@@ -27,7 +27,7 @@ func MakeAuthorisedGetRequest(tokenGetter auth.TokenGetter, ctx context.Context,
 		return fmt.Errorf("building GET request: %w", err)
 	}
 
-	if err := tokenGetter.SetAuthHeader(req); err != nil {
+	if err := tokenGetter.SetAuthHeader(ctx, req); err != nil {
 		return fmt.Errorf("setting auth header: %w", err)
 	}
 
@@ -51,7 +51,7 @@ func MakeAuthorisedPostRequest(tokenGetter auth.TokenGetter, ctx context.Context
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	if err := tokenGetter.SetAuthHeader(req); err != nil {
+	if err := tokenGetter.SetAuthHeader(ctx, req); err != nil {
 		return fmt.Errorf("setting auth header: %w", err)
 	}
 
