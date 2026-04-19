@@ -1,0 +1,7 @@
+version: "2"
+
+formatters:
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/mikelear/leartech-go-common
