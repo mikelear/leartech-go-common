@@ -1,0 +1,50 @@
+# 1.0d: Auto-trigger Renovate after shared-library main-branch pushes.
+#
+# leartech-go-common is a Go library (no Docker image, no Helm chart) so
+# there's no traditional release pipeline. But every main-branch commit
+# can produce a new go.mod-discoverable version (Go modules pull from
+# git directly), and consumers waited until next Monday 7am for Renovate
+# to open bump PRs. This postsubmit kicks Renovate immediately so the
+# bumps flow within minutes — already-configured automerge in
+# leartech-renovate-config/go-service.json takes them through.
+#
+# Idempotent on no-op pushes — Renovate detects nothing to bump and
+# exits cleanly.
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: leartech-go-common-trigger-renovate
+spec:
+  pipelineSpec:
+    tasks:
+    - name: trigger-renovate
+      resources: {}
+      taskSpec:
+        metadata: {}
+        stepTemplate:
+          name: ""
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          workingDir: /workspace/source
+        steps:
+        - image: alpine/k8s:1.28.4
+          name: trigger-renovate
+          resources: {}
+          script: |
+            #!/bin/sh
+            set -e
+            JOB="renovate-after-go-common-$(date +%s)"
+            echo "==> creating one-shot ${JOB} from cronjob/renovate"
+            kubectl -n jx create job --from=cronjob/renovate "${JOB}" || \
+              echo "::WARN renovate trigger failed (non-fatal); next Monday cron will pick up the bump"
+  podTemplate:
+    tolerations:
+    - key: sku
+      operator: Equal
+      value: build
+      effect: NoSchedule
+  serviceAccountName: tekton-bot
+  timeout: 5m0s
+status: {}

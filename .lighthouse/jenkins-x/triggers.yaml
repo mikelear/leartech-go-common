@@ -29,5 +29,13 @@ spec:
     trigger: "(?m)^/ai-feedback"
     rerun_command: "/ai-feedback"
     source: ai-review/feedback.yaml
-  # No release postsubmit — library releases are manual git tags.
   # No pr/end2end/image-scan/dynamic-scan — no container, no deployment.
+  postsubmits:
+  # 1.0d: trigger Renovate on every main-branch push so consumer go.mod
+  # bumps flow within minutes (instead of waiting until Monday 7am).
+  - name: trigger-renovate
+    context: "trigger-renovate"
+    source: release.yaml
+    branches:
+    - ^main$
+    - ^master$
