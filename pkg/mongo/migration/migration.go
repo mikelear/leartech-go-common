@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	learmongo "github.com/mikelear/leartech-go-common/pkg/mongo"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // BaseModel provides common audit fields for MongoDB documents.
@@ -41,26 +41,26 @@ func (b *BaseModel) UpdateTimestamps() {
 type Migration struct {
 	Version     string
 	Description string
-	Up          func(ctx context.Context, db learmongo.MongoDatabase) error
+	Up          func(ctx context.Context, db learmongo.Database) error
 }
 
-// MigrationManager runs migrations in order, tracking applied versions.
-type MigrationManager struct {
-	client     learmongo.MongoClient
+// Manager runs migrations in order, tracking applied versions.
+type Manager struct {
+	client     learmongo.Client
 	dbName     string
 	migrations []Migration
 }
 
-// NewMigrationManager creates a new migration manager.
-func NewMigrationManager(client learmongo.MongoClient, dbName string) *MigrationManager {
-	return &MigrationManager{
+// NewManager creates a new migration manager.
+func NewManager(client learmongo.Client, dbName string) *Manager {
+	return &Manager{
 		client: client,
 		dbName: dbName,
 	}
 }
 
 // Register adds a migration to the manager.
-func (m *MigrationManager) Register(migration Migration) {
+func (m *Manager) Register(migration Migration) {
 	m.migrations = append(m.migrations, migration)
 }
 
@@ -70,15 +70,14 @@ type migrationRecord struct {
 }
 
 // RunMigrations applies all unapplied migrations in version order.
-func (m *MigrationManager) RunMigrations(ctx context.Context, limit int) error {
+func (m *Manager) RunMigrations(ctx context.Context, limit int) error {
 	db := m.client.Database(m.dbName)
 	migrationsColl := db.Collection("_migrations")
 
-	// Get applied versions
 	applied := make(map[string]bool)
 	cursor, err := migrationsColl.Find(ctx, bson.M{})
 	if err == nil {
-		defer cursor.Close(ctx)
+		defer func() { _ = cursor.Close(ctx) }()
 		for cursor.Next(ctx) {
 			var record migrationRecord
 			if err := cursor.Decode(&record); err == nil {
@@ -87,7 +86,6 @@ func (m *MigrationManager) RunMigrations(ctx context.Context, limit int) error {
 		}
 	}
 
-	// Sort migrations by version
 	sort.Slice(m.migrations, func(i, j int) bool {
 		return m.migrations[i].Version < m.migrations[j].Version
 	})

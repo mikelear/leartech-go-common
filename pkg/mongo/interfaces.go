@@ -10,19 +10,19 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-// MongoClient wraps the MongoDB client.
-type MongoClient interface {
-	Database(name string) MongoDatabase
+// Client wraps the MongoDB client.
+type Client interface {
+	Database(name string) Database
 	Disconnect(ctx context.Context) error
 }
 
-// MongoDatabase wraps a MongoDB database.
-type MongoDatabase interface {
-	Collection(name string) MongoCollection
+// Database wraps a MongoDB database.
+type Database interface {
+	Collection(name string) Collection
 }
 
-// MongoCollection wraps a MongoDB collection with typed operations.
-type MongoCollection interface {
+// Collection wraps a MongoDB collection with typed operations.
+type Collection interface {
 	FindOne(ctx context.Context, filter interface{}) *mongo.SingleResult
 	Find(ctx context.Context, filter interface{}, opts ...options.Lister[options.FindOptions]) (*mongo.Cursor, error)
 	InsertOne(ctx context.Context, document interface{}) (*mongo.InsertOneResult, error)
@@ -36,8 +36,8 @@ type MongoCollection interface {
 	CreateIndexes(ctx context.Context, indexes []mongo.IndexModel) ([]string, error)
 }
 
-// MongoIndex defines an index to create.
-type MongoIndex struct {
+// Index defines an index to create.
+type Index struct {
 	Keys   bson.D
 	Unique bool
 }

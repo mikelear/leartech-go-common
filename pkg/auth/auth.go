@@ -26,7 +26,7 @@ import (
 
 // TokenClaimsKey is the gin context key where decoded claims are stored
 // after successful middleware validation.
-const TokenClaimsKey = "leartech_auth_claims"
+const TokenClaimsKey = "leartech_auth_claims" //nolint:gosec // G101 false positive: context key name, not a credential
 
 // AuthorizationHeaderKey is the HTTP header key for Bearer tokens.
 const AuthorizationHeaderKey = "Authorization"

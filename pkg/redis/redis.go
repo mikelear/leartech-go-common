@@ -10,8 +10,8 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
-// RedisConfig holds Redis connection parameters.
-type RedisConfig struct {
+// Config holds Redis connection parameters.
+type Config struct {
 	Host     string `yaml:"host" json:"host"`
 	Port     int    `yaml:"port" json:"port"`
 	Password string `yaml:"password" json:"password"`
@@ -19,7 +19,7 @@ type RedisConfig struct {
 }
 
 // NewRedisClient creates a connected Redis client from config.
-func NewRedisClient(cfg RedisConfig) (*goredis.Client, error) {
+func NewRedisClient(cfg Config) (*goredis.Client, error) {
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	client := goredis.NewClient(&goredis.Options{
 		Addr:     addr,
