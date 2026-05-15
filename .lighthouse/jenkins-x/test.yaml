@@ -15,10 +15,15 @@ spec:
           name: ""
           resources: {}
           workingDir: /workspace/source
-          # Template has no business logic yet — 60% golden-std threshold can't
-          # be met with trivial smoke tests. Consumers that clone-and-rename
-          # should remove this override once they add real code + tests.
+          # go-common's code lives under ./pkg/..., not the default
+          # ./internal/... — without this scope override, go-test
+          # runs against the wrong tree and reports 0% coverage.
+          # COVERAGE_THRESHOLD kept at 30% during the test-backfill
+          # phase (most pkgs have 0 tests today, see task #130).
+          # Raise toward 60% as backfill lands.
           env:
+          - name: COVERAGE_SCOPE
+            value: "./pkg/..."
           - name: COVERAGE_THRESHOLD
             value: "30.0"
         steps:
