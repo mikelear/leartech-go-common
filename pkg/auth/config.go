@@ -21,7 +21,7 @@ package auth
 //	      key: CLIENT_SECRET
 //	      name: backend-service-oauth
 type Config struct {
-	// ServerURL is the Hydra public URL (e.g. https://hydra-jx-staging.jx.leartech.com)
+	// ServerURL is the Hydra public URL for the cluster (set via LEARTECH_AUTH_SERVER_URL).
 	ServerURL string `env:"LEARTECH_AUTH_SERVER_URL" yaml:"serverURL"`
 	// ClientID for the OAuth2 client_credentials flow
 	ClientID string `env:"LEARTECH_AUTH_CLIENT_ID" yaml:"clientID"`

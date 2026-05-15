@@ -22,7 +22,7 @@ type collectionWrapper struct {
 }
 
 // NewClient creates a connected MongoDB client.
-func NewClient(connectionString string) (MongoClient, error) {
+func NewClient(connectionString string) (Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -38,7 +38,7 @@ func NewClient(connectionString string) (MongoClient, error) {
 	return &clientWrapper{client: client}, nil
 }
 
-func (c *clientWrapper) Database(name string) MongoDatabase {
+func (c *clientWrapper) Database(name string) Database {
 	return &databaseWrapper{db: c.client.Database(name)}
 }
 
@@ -46,7 +46,7 @@ func (c *clientWrapper) Disconnect(ctx context.Context) error {
 	return c.client.Disconnect(ctx)
 }
 
-func (d *databaseWrapper) Collection(name string) MongoCollection {
+func (d *databaseWrapper) Collection(name string) Collection {
 	return &collectionWrapper{coll: d.db.Collection(name)}
 }
 

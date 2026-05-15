@@ -158,7 +158,7 @@ func (c *ServiceClient) Ping(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check returned %d", resp.StatusCode)
 	}
@@ -193,11 +193,11 @@ func getTokenFromHeader(header string) (string, error) {
 // noopClient is returned when ServerURL is empty (local dev, no auth).
 type noopClient struct{}
 
-func (n *noopClient) IsDisabled() bool                                    { return true }
-func (n *noopClient) GetAuthToken(_ context.Context) (*string, error)     { s := ""; return &s, nil }
+func (n *noopClient) IsDisabled() bool                                       { return true }
+func (n *noopClient) GetAuthToken(_ context.Context) (*string, error)        { s := ""; return &s, nil }
 func (n *noopClient) SetAuthHeader(_ context.Context, _ *http.Request) error { return nil }
-func (n *noopClient) HTTPClient() *http.Client                            { return http.DefaultClient }
-func (n *noopClient) Ping(_ context.Context) error                        { return nil }
+func (n *noopClient) HTTPClient() *http.Client                               { return http.DefaultClient }
+func (n *noopClient) Ping(_ context.Context) error                           { return nil }
 
 func (n *noopClient) Middleware(_ Permissions) gin.HandlerFunc {
 	return func(gc *gin.Context) { gc.Next() }

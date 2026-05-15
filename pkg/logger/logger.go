@@ -14,6 +14,7 @@ import (
 // OutputStyle controls log formatting.
 type OutputStyle string
 
+// OutputStyle values selecting the zerolog writer format.
 const (
 	OutputJSON    OutputStyle = "json"
 	OutputConsole OutputStyle = "console"

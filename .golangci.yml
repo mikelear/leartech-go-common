@@ -1,5 +1,16 @@
 version: "2"
 
+linters:
+  exclusions:
+    rules:
+      # pkg/httptools is a service-to-service HTTP helper; the request URL is
+      # caller-supplied by design. G704 (SSRF taint analysis) is a false
+      # positive for this package — there is no external user input path.
+      - path: 'pkg/httptools/'
+        text: 'G704'
+        linters:
+          - gosec
+
 formatters:
   settings:
     goimports:
