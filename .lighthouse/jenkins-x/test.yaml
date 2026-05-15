@@ -19,25 +19,19 @@ spec:
           # ./internal/... — without this scope override, go-test
           # runs against the wrong tree and reports 0% coverage.
           #
-          # COVERAGE_THRESHOLD intentionally set LOW (5%) during the
-          # test-backfill phase. Reality 2026-05-15: only pkg/tracing
-          # has tests (PR#3, ~9% of total pkg surface). Raising the
-          # floor before backfilling tests would block ALL new PRs.
+          # go-common's code lives under ./pkg/..., so the gate scope
+          # is overridden from the default ./internal/...
           #
-          # RATCHET-UP PLAN (per qa-architecture / task #130 backfill):
-          #   - After pkg/auth tests land: bump floor → 25%
-          #   - After pkg/logger + pkg/lock tests: bump → 40%
-          #   - After pkg/mongo + pkg/redis tests: bump → 60% (golden std)
-          #
-          # Delta-coverage gate (catalog 2026-05-15) catches per-PR
-          # regressions — the low floor doesn't open the door for
-          # untested new code; it just unblocks PRs against an
-          # already-untested baseline.
+          # Floor 60% matches the leartech golden-service standard.
+          # Backfill landed via task #130 (pkg/redis 100%, pkg/logger 100%,
+          # pkg/httptools 91%, pkg/queue 86%, pkg/lock 80%, pkg/tracing 80%,
+          # pkg/auth 57%, pkg/mongo 32%, pkg/mongo/migration 18%).
+          # Total ~63%. Delta-coverage gate enforces no future regression.
           env:
           - name: COVERAGE_SCOPE
             value: "./pkg/..."
           - name: COVERAGE_THRESHOLD
-            value: "5.0"
+            value: "60.0"
         steps:
         - name: ""
           resources: {}
