@@ -38,10 +38,51 @@ func TestNewTokenClaimsFromMapClaims_RejectsMissingSub(t *testing.T) {
 	assert.Contains(t, err.Error(), "sub")
 }
 
-func TestNewTokenClaimsFromMapClaims_RejectsMissingScope(t *testing.T) {
-	_, err := NewTokenClaimsFromMapClaims(jwt.MapClaims{"sub": "u"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "scope")
+// Hydra-issued JWT access tokens carry scopes under `scp` (an array,
+// per JWT IANA registry), not `scope` (string, OAuth2 introspection
+// convention). Failing to read `scp` was the root cause of the staging
+// fleet-test failure on 2026-05-18 — middleware activated correctly,
+// then rejected every valid PKCE token with "missing 'scope' claim".
+func TestNewTokenClaimsFromMapClaims_HydraScpArrayForm(t *testing.T) {
+	// Real staging-issued token shape (PKCE user login → frontend-services
+	// client). aud is multi-valued (RFC 8707), scopes are openid+offline.
+	mc := jwt.MapClaims{
+		"sub": "user-test-001",
+		"aud": []interface{}{
+			"leartech-rust-service-template",
+			"leartech-go-service-template",
+			"leartech-dotnet-service-template",
+			"leartech-auth-service",
+		},
+		"scp": []interface{}{"openid", "offline"},
+		"ext": map[string]interface{}{"Permissions": []any{"SuperAdmin"}},
+	}
+	claims, err := NewTokenClaimsFromMapClaims(mc)
+	require.NoError(t, err)
+	assert.Equal(t, "user-test-001", claims.UserID)
+	assert.Equal(t, Scopes{Scope("openid"), Scope("offline")}, claims.Scopes)
+}
+
+func TestNewTokenClaimsFromMapClaims_PrefersScpOverScope(t *testing.T) {
+	// If both are present (e.g. legacy introspection adapter emitting
+	// both), `scp` wins because it's the JWT IANA standard.
+	mc := jwt.MapClaims{
+		"sub":   "u",
+		"scp":   []interface{}{"leartechapi"},
+		"scope": "leartechapi.internal_services",
+	}
+	claims, err := NewTokenClaimsFromMapClaims(mc)
+	require.NoError(t, err)
+	assert.Equal(t, Scopes{ScopeAPI}, claims.Scopes)
+}
+
+func TestNewTokenClaimsFromMapClaims_MissingScopeIsOK(t *testing.T) {
+	// Tokens with no scope claim parse cleanly. Whether they're allowed
+	// is the caller's decision via permissions check, not this layer's.
+	claims, err := NewTokenClaimsFromMapClaims(jwt.MapClaims{"sub": "u"})
+	require.NoError(t, err)
+	assert.Equal(t, "u", claims.UserID)
+	assert.Empty(t, claims.Scopes)
 }
 
 func TestNewTokenClaimsFromMapClaims_RejectsBadScopeType(t *testing.T) {

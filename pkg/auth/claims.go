@@ -25,13 +25,21 @@ func NewTokenClaimsFromMapClaims(mc jwt.MapClaims) (*TokenClaims, error) {
 		return nil, fmt.Errorf("token missing 'sub' claim")
 	}
 
-	// Scopes (required — space-separated string in "scope" claim)
-	scopes, err := newScopesFromAny(mc["scope"])
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse 'scope' claim: %w", err)
+	// Scopes — prefer `scp` (JWT IANA standard for JWT-format scopes;
+	// what Ory Hydra emits on access tokens as an array), fall back to
+	// `scope` (OAuth2 introspection convention; space-separated string).
+	// Empty/missing scopes are NOT an error here — the caller decides
+	// via `Middleware(requiredPerms)` whether unscoped tokens are allowed.
+	// Mirrors rust + dotnet templates' AuthLayer behaviour which accept
+	// any audience-bound valid-signature token and leave scope checks
+	// to the handler.
+	scopesAny := mc["scp"]
+	if scopesAny == nil {
+		scopesAny = mc["scope"]
 	}
-	if len(scopes) == 0 {
-		return nil, fmt.Errorf("token missing 'scope' claim")
+	scopes, err := newScopesFromAny(scopesAny)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse scope claim: %w", err)
 	}
 
 	// Permissions (optional — present in user tokens, absent in service tokens)

@@ -124,9 +124,20 @@ func (c *ServiceClient) Middleware(requiredPerms Permissions) gin.HandlerFunc {
 }
 
 // isTokenAllowedAccess checks if the token has the required permissions.
-// Internal service tokens (ScopeInternalServices) get full access.
-// User tokens need the API scope AND the required permissions.
+//
+// When `requiredPerms` is nil (the `Middleware(nil)` form, which says
+// "any authenticated user"), any audience-validated signed token is
+// allowed — matching rust + dotnet templates' AuthLayer behaviour.
+// PKCE user tokens with only `openid offline` scopes (the SPA pattern)
+// are accepted here.
+//
+// When `requiredPerms` is non-empty, the token must either:
+//   - have the internal-services scope (full S2S access), OR
+//   - have the API scope AND match at least one required permission
 func (c *ServiceClient) isTokenAllowedAccess(requiredPerms Permissions, claims *TokenClaims) bool {
+	if len(requiredPerms) == 0 {
+		return true
+	}
 	return claims.Scopes.HasInternalService() ||
 		(claims.Scopes.HasAPI() && claims.Permissions.IsPermitted(requiredPerms))
 }
