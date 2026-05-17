@@ -62,6 +62,44 @@ func TestNewServiceClient_InvalidServerURL(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestIsTokenAllowedAccess(t *testing.T) {
+	c := &ServiceClient{}
+	t.Run("nil requiredPerms accepts any authenticated token (mirrors Middleware(nil))", func(t *testing.T) {
+		// PKCE user token from staging — scopes=[openid offline], no API scope.
+		// This must pass when the handler is wrapped with `Middleware(nil)`,
+		// matching rust + dotnet templates' behaviour. Strict-scope enforcement
+		// at this layer was blocking valid fleet-test calls on 2026-05-18.
+		claims := &TokenClaims{
+			UserID: "user-test-001",
+			Scopes: Scopes{Scope("openid"), Scope("offline")},
+		}
+		assert.True(t, c.isTokenAllowedAccess(nil, claims))
+		assert.True(t, c.isTokenAllowedAccess(Permissions{}, claims))
+	})
+	t.Run("empty requiredPerms accepts any authenticated token", func(t *testing.T) {
+		claims := &TokenClaims{UserID: "u", Scopes: Scopes{}}
+		assert.True(t, c.isTokenAllowedAccess(Permissions{}, claims))
+	})
+	t.Run("internal-services scope grants full access", func(t *testing.T) {
+		claims := &TokenClaims{Scopes: Scopes{ScopeInternalServices}}
+		assert.True(t, c.isTokenAllowedAccess(Permissions{PermAdmin}, claims))
+	})
+	t.Run("API scope + required perm match → allowed", func(t *testing.T) {
+		claims := &TokenClaims{Scopes: Scopes{ScopeAPI}, Permissions: Permissions{PermAdmin}}
+		assert.True(t, c.isTokenAllowedAccess(Permissions{PermAdmin}, claims))
+	})
+	t.Run("API scope but missing required perm → denied", func(t *testing.T) {
+		claims := &TokenClaims{Scopes: Scopes{ScopeAPI}, Permissions: Permissions{PermUser}}
+		assert.False(t, c.isTokenAllowedAccess(Permissions{PermAdmin}, claims))
+	})
+	t.Run("no API scope, requiredPerms specified → denied", func(t *testing.T) {
+		// User token without leartechapi but a specific perm required —
+		// denied. The handler asked for more than "any authenticated user".
+		claims := &TokenClaims{Scopes: Scopes{Scope("openid")}, Permissions: Permissions{PermAdmin}}
+		assert.False(t, c.isTokenAllowedAccess(Permissions{PermAdmin}, claims))
+	})
+}
+
 func TestGetTokenFromHeader(t *testing.T) {
 	tests := []struct {
 		name    string

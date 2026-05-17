@@ -8,17 +8,36 @@ import (
 )
 
 func TestNewScopesFromAny(t *testing.T) {
-	t.Run("space-separated string", func(t *testing.T) {
+	t.Run("space-separated string (OAuth2 introspection form)", func(t *testing.T) {
 		got, err := newScopesFromAny("leartechapi leartechapi.internal_services")
 		require.NoError(t, err)
 		assert.Equal(t, Scopes{ScopeAPI, ScopeInternalServices}, got)
 	})
-	t.Run("single scope", func(t *testing.T) {
+	t.Run("single scope string", func(t *testing.T) {
 		got, err := newScopesFromAny("leartechapi")
 		require.NoError(t, err)
 		assert.Equal(t, Scopes{ScopeAPI}, got)
 	})
-	t.Run("non-string input", func(t *testing.T) {
+	t.Run("array form (Hydra JWT scp claim)", func(t *testing.T) {
+		// Hydra emits scp as []interface{} via jwt.MapClaims after JSON
+		// unmarshal — the same shape as the staging fleet-test token.
+		got, err := newScopesFromAny([]interface{}{"openid", "offline"})
+		require.NoError(t, err)
+		assert.Equal(t, Scopes{Scope("openid"), Scope("offline")}, got)
+	})
+	t.Run("nil input → empty scopes, no error", func(t *testing.T) {
+		// Tokens without any scope claim are valid; callers decide
+		// via permissions whether unscoped tokens are allowed.
+		got, err := newScopesFromAny(nil)
+		require.NoError(t, err)
+		assert.Equal(t, Scopes{}, got)
+	})
+	t.Run("non-string array element rejected", func(t *testing.T) {
+		_, err := newScopesFromAny([]interface{}{"openid", 42})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "non-string element")
+	})
+	t.Run("unsupported type rejected", func(t *testing.T) {
 		_, err := newScopesFromAny([]string{"x"})
 		require.Error(t, err)
 	})
