@@ -176,7 +176,50 @@ func (c *ServiceClient) decodeToken(tokenStr string) (*TokenClaims, error) {
 		return nil, fmt.Errorf("token is invalid")
 	}
 
+	// RFC 8707 audience binding: when Audience is configured, the token's
+	// `aud` claim must contain this service's name. Rust + .NET templates
+	// already enforce this strictly; go-common was historically lenient
+	// (no aud check at all), which masked broken audience-propagation in
+	// the auth chain (see leartech-ts-common#12 — token refresh dropped
+	// audience= and only go-template still accepted the resulting empty
+	// aud token).
+	if c.cfg.Audience != "" {
+		if err := validateAudience(claims, c.cfg.Audience); err != nil {
+			return nil, fmt.Errorf("audience validation failed: %w", err)
+		}
+	} else {
+		// Log once so operators see the gap. Don't fail-open silently.
+		log.Warn().Msg("auth: LEARTECH_AUTH_AUDIENCE not set — accepting any token's aud claim. Set this in production to enforce RFC 8707 audience binding.")
+	}
+
 	return NewTokenClaimsFromMapClaims(claims)
+}
+
+// validateAudience checks the token's `aud` claim contains the expected
+// audience. RFC 7519 §4.1.3 allows aud to be either a string or an
+// array — handle both. Returns nil on match, error on mismatch.
+func validateAudience(claims jwt.MapClaims, expected string) error {
+	audAny, ok := claims["aud"]
+	if !ok {
+		return fmt.Errorf("token missing 'aud' claim (expected to contain %q)", expected)
+	}
+
+	switch v := audAny.(type) {
+	case string:
+		if v == expected {
+			return nil
+		}
+		return fmt.Errorf("token aud %q does not match expected %q", v, expected)
+	case []interface{}:
+		for _, a := range v {
+			if s, ok := a.(string); ok && s == expected {
+				return nil
+			}
+		}
+		return fmt.Errorf("token aud %v does not contain expected %q", v, expected)
+	default:
+		return fmt.Errorf("token aud claim has unexpected type %T", audAny)
+	}
 }
 
 func getTokenFromHeader(header string) (string, error) {
