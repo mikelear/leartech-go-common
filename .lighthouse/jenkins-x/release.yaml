@@ -1,40 +1,132 @@
-# 1.0d: Auto-trigger Renovate after shared-library main-branch pushes.
+# Release pipeline for leartech-go-common.
 #
-# leartech-go-common is a Go library (no Docker image, no Helm chart) so
-# there's no traditional release pipeline. But every main-branch commit
-# can produce a new go.mod-discoverable version (Go modules pull from
-# git directly), and consumers waited until next Monday 7am for Renovate
-# to open bump PRs. This postsubmit kicks Renovate immediately so the
-# bumps flow within minutes — already-configured automerge in
-# leartech-renovate-config/go-service.json takes them through.
+# Go libraries publish by git tag — consumers `go get` resolves
+# `github.com/mikelear/leartech-go-common@vX.Y.Z` against tags on the
+# repo. So "release" here is:
 #
-# Idempotent on no-op pushes — Renovate detects nothing to bump and
-# exits cleanly.
+#   1. next-version  — compute the next vX.Y.Z from conventional commits
+#                      since the last tag (jx-release-version).
+#   2. tag-release   — `git tag vX.Y.Z && git push origin vX.Y.Z`.
+#                      Primary-cluster-guarded (CLUSTER_ID=gcp) so both
+#                      clusters' release pipelines compute the same
+#                      version but only GCP pushes the tag — avoids the
+#                      "tag already exists" 409 when the second cluster
+#                      tries to push the same ref. Mirrors the npm
+#                      primary-cluster guard in leartech-ts-common.
+#   3. trigger-renovate — kick the Renovate cronjob so consumer repos
+#                         get bump PRs within minutes, not next Monday.
+#                         Replaces the prior renovate-only release.yaml.
+#
+# Ported from leartech-ts-common's release pattern (other-session task
+# #145). rust-common + dotnet-common follow next.
 apiVersion: tekton.dev/v1beta1
 kind: PipelineRun
 metadata:
-  name: leartech-go-common-trigger-renovate
+  creationTimestamp: null
+  name: release
 spec:
   pipelineSpec:
     tasks:
-    - name: trigger-renovate
+    - name: release
       resources: {}
       taskSpec:
         metadata: {}
         stepTemplate:
+          env:
+          - name: HOME
+            value: /tekton/home
+          - name: GIT_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: tekton-git
+                key: password
+                optional: true
+          envFrom:
+          - secretRef:
+              name: jx-boot-job-env-vars
+              optional: true
           name: ""
           resources:
             requests:
               cpu: 50m
-              memory: 64Mi
+              memory: 128Mi
           workingDir: /workspace/source
         steps:
+        - image: uses:jenkins-x/jx3-pipeline-catalog/tasks/git-clone/git-clone.yaml@versionStream
+          name: ""
+          resources: {}
+        - image: alpine:3.20
+          name: next-version
+          resources: {}
+          script: |
+            #!/bin/sh
+            set -eu
+            apk add --no-cache git curl tar
+            # Pinned to v2.8.4 — upstream v2.9.0 (2026-05-14) shipped with
+            # zero release assets, so /latest/download/ resolves to 404.
+            # Revisit once v2.9.x is republished with binaries.
+            curl -fsSL https://github.com/jenkins-x-plugins/jx-release-version/releases/download/v2.8.4/jx-release-version-linux-amd64.tar.gz | tar xz -C /usr/local/bin
+            jx-release-version --previous-version from-tag > VERSION
+            echo "Next version: $(cat VERSION)"
+        - image: alpine:3.20
+          name: tag-release
+          env:
+            # Cluster identity for the primary-cluster guard. Both clusters
+            # run this release pipeline (postsubmit on main); only one of
+            # them should push the tag — without the guard the second
+            # cluster's `git push origin vX.Y.Z` hits 409 (tag already
+            # exists). Mirrors the npm primary-cluster guard in
+            # leartech-ts-common.
+            - name: CLUSTER_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: jx-cluster-config
+                  key: CLUSTER_ID
+                  optional: true
+          resources: {}
+          script: |
+            #!/bin/sh
+            set -eu
+            apk add --no-cache git
+            VERSION=$(cat VERSION)
+
+            # Skip on non-primary cluster. GCP is the primary by convention
+            # (alphabetical, first cluster onboarded). The tag itself is
+            # the published artifact for Go modules — no separate registry
+            # publish step needed.
+            if [ "${CLUSTER_ID:-unknown}" != "gcp" ]; then
+              echo "==> CLUSTER_ID=${CLUSTER_ID:-unknown} — skipping tag push (primary cluster gcp tags for all). Version computed cleanly: v${VERSION}."
+              exit 0
+            fi
+
+            git config user.email "jenkins-x@googlegroups.com"
+            git config user.name "jenkins-x-bot"
+
+            # Idempotency: if the tag already exists locally OR remotely
+            # (e.g. a prior pipeline already pushed it), skip cleanly.
+            if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+              echo "==> tag v${VERSION} already exists locally — skipping"
+              exit 0
+            fi
+            if git ls-remote --tags origin "v${VERSION}" | grep -q "v${VERSION}"; then
+              echo "==> tag v${VERSION} already exists on remote — skipping"
+              exit 0
+            fi
+
+            git tag -a "v${VERSION}" -m "Release v${VERSION}"
+            git push origin "v${VERSION}"
+            echo "==> tagged + pushed v${VERSION}"
         - image: alpine/k8s:1.28.4
           name: trigger-renovate
           resources: {}
           script: |
             #!/bin/sh
             set -e
+            # Kick the Renovate cronjob so consumer repos see the new tag
+            # within minutes. Renovate's normal schedule is Monday 7am;
+            # this collapses that latency. Idempotent — Renovate detects
+            # nothing to bump if the tag isn't actually new yet (e.g.
+            # non-primary cluster ran first and the tag isn't there).
             JOB="renovate-after-go-common-$(date +%s)"
             echo "==> creating one-shot ${JOB} from cronjob/renovate"
             kubectl -n jx create job --from=cronjob/renovate "${JOB}" || \
@@ -46,5 +138,5 @@ spec:
       value: build
       effect: NoSchedule
   serviceAccountName: tekton-bot
-  timeout: 5m0s
+  timeout: 15m0s
 status: {}
