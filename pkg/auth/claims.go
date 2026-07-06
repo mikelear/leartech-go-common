@@ -12,6 +12,15 @@ type TokenClaims struct {
 	UserID      string
 	Permissions Permissions
 	Scopes      Scopes
+
+	// Identity claims — extracted from ext.tenant_id / ext.user_role /
+	// ext.external_id, which auth-service mints on every user token. Optional
+	// and additive: empty on tokens that don't carry them (e.g. service
+	// tokens). These are pure identity — independent of the (deferred)
+	// two-tier PlatformPermissions model.
+	TenantID   string
+	UserRole   string
+	ExternalID string
 }
 
 // NewTokenClaimsFromMapClaims extracts leartech-specific claims from a JWT.
@@ -55,7 +64,29 @@ func NewTokenClaimsFromMapClaims(mc jwt.MapClaims) (*TokenClaims, error) {
 		UserID:      userID,
 		Permissions: permissions,
 		Scopes:      scopes,
+		TenantID:    extractExtStringClaim(mc, "tenant_id"),
+		UserRole:    extractExtStringClaim(mc, "user_role"),
+		ExternalID:  extractExtStringClaim(mc, "external_id"),
 	}, nil
+}
+
+// extractExtStringClaim reads a string value from the "ext" custom-claims map
+// (where Hydra places leartech claims). Returns "" when ext is absent, not a
+// map, or the key is missing / not a string.
+func extractExtStringClaim(mc jwt.MapClaims, key string) string {
+	ext, ok := mc["ext"]
+	if !ok {
+		return ""
+	}
+	extMap, ok := ext.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	val, ok := extMap[key].(string)
+	if !ok {
+		return ""
+	}
+	return val
 }
 
 // extractPermissionsFromClaims reads ext.Permissions from the JWT claims.
