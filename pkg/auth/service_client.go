@@ -109,6 +109,11 @@ func (c *ServiceClient) Middleware(requiredPerms Permissions) gin.HandlerFunc {
 		tokenClaims, err := c.GetRequestTokenClaimsFromGinContext(gc)
 		if err != nil {
 			log.Debug().Err(err).Msg("failed to decode/verify token")
+			// RFC 9728 §5.1: point the client at the resource-metadata doc so
+			// it can discover the authorisation server. No-op unless configured.
+			if hint := wwwAuthenticateBearerHint(c.cfg); hint != "" {
+				gc.Header("WWW-Authenticate", hint)
+			}
 			gc.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}

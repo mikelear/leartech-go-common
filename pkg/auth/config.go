@@ -40,4 +40,20 @@ type Config struct {
 	Audience string `env:"LEARTECH_AUTH_AUDIENCE" yaml:"audience"`
 	// DisableMiddleware stops endpoint auth checks (local dev only, never in prod)
 	DisableMiddleware bool `yaml:"disableMiddleware"`
+
+	// --- RFC 9728 OAuth 2.0 Protected Resource Metadata (opt-in) ---
+	// Populated only by resource servers (e.g. the public MCP host) that
+	// advertise their authorisation server(s) to external clients. All three
+	// empty = discovery off: ResourceMetadataHandler 404s and Middleware's
+	// 401s carry no WWW-Authenticate hint (unchanged legacy behaviour).
+
+	// Resource is this resource server's canonical URI (RFC 9728 §3.1 `resource`).
+	Resource string `env:"LEARTECH_AUTH_RESOURCE" yaml:"resource"`
+	// AuthorizationServers lists the issuer URLs that mint tokens for this
+	// resource (RFC 9728 §3.1 `authorization_servers`).
+	AuthorizationServers []string `env:"LEARTECH_AUTH_AUTHORIZATION_SERVERS" envSeparator:"," yaml:"authorizationServers"`
+	// ResourceMetadataURL is the absolute URL of this resource's metadata
+	// document; when set, Middleware emits it as the WWW-Authenticate
+	// `resource_metadata=` hint on 401 (RFC 9728 §5.1).
+	ResourceMetadataURL string `env:"LEARTECH_AUTH_RESOURCE_METADATA_URL" yaml:"resourceMetadataURL"`
 }
