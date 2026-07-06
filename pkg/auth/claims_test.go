@@ -107,3 +107,29 @@ func TestExtractPermissionsFromClaims_MissingPermissionsKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, got)
 }
+
+func TestNewTokenClaimsFromMapClaims_IdentityClaims(t *testing.T) {
+	mc := jwt.MapClaims{
+		"sub":   "user-123",
+		"scope": "leartechapi",
+		"ext": map[string]interface{}{
+			"tenant_id":   "00000000-0000-0000-0000-000000000001",
+			"user_role":   "platform_admin",
+			"external_id": "user-test-platform",
+		},
+	}
+	claims, err := NewTokenClaimsFromMapClaims(mc)
+	require.NoError(t, err)
+	assert.Equal(t, "00000000-0000-0000-0000-000000000001", claims.TenantID)
+	assert.Equal(t, "platform_admin", claims.UserRole)
+	assert.Equal(t, "user-test-platform", claims.ExternalID)
+}
+
+func TestNewTokenClaimsFromMapClaims_IdentityClaimsAbsent(t *testing.T) {
+	// Service token (no ext identity) → empty strings, not an error.
+	claims, err := NewTokenClaimsFromMapClaims(jwt.MapClaims{"sub": "svc-1", "scope": "internalservice"})
+	require.NoError(t, err)
+	assert.Empty(t, claims.TenantID)
+	assert.Empty(t, claims.UserRole)
+	assert.Empty(t, claims.ExternalID)
+}
