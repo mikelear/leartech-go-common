@@ -1,0 +1,14 @@
+template: testify
+formatter: goimports
+force-file-write: true
+log-level: info
+structname: Mock{{.InterfaceName}}
+packages:
+  github.com/mikelear/leartech-go-common/pkg/auth:
+    config:
+      dir: '{{.InterfaceDir}}'
+      filename: '{{.InterfaceName | lower}}_mock.go'
+      pkgname: '{{.SrcPackageName}}'
+    interfaces:
+      ServiceAuthClient:
+      TokenGetter:
