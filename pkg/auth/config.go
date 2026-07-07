@@ -27,6 +27,13 @@ type Config struct {
 	ClientID string `env:"LEARTECH_AUTH_CLIENT_ID" yaml:"clientID"`
 	// ClientSecret for the OAuth2 client_credentials flow
 	ClientSecret string `env:"LEARTECH_AUTH_CLIENT_SECRET" yaml:"clientSecret"`
+	// TargetAudience is the OUTBOUND audience requested when minting a
+	// client_credentials token (RFC 8707) — the callee this service calls.
+	// Hydra binds the minted token's `aud` to it (verified: without it,
+	// client_credentials mints aud=[]). Empty = don't request an audience.
+	// Distinct from Audience below, which is this service's OWN inbound aud.
+	// §A-full will add a per-call audience for addressing multiple callees.
+	TargetAudience string `env:"LEARTECH_AUTH_TARGET_AUDIENCE" yaml:"targetAudience"`
 	// Audience is this service's own audience identifier (per RFC 8707).
 	// Inbound JWT validation requires the token's `aud` claim to contain
 	// this value — rejecting tokens issued for other services even when

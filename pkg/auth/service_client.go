@@ -44,6 +44,14 @@ func NewServiceClient(ctx context.Context, cfg Config) (ServiceAuthClient, error
 		Scopes:       []string{string(ScopeInternalServices)},
 		AuthStyle:    oauth2.AuthStyleInParams,
 	}
+	// §A-minimal (RFC 8707): request a per-service audience so Hydra binds the
+	// minted token's `aud` to the target callee. Without this, client_credentials
+	// tokens come back with aud=[] (the client's `audience` field is only an
+	// allow-list, not a default), so any audience-validating callee fails open.
+	// Empty TargetAudience = unset (legacy scope-only behaviour, no regression).
+	if cfg.TargetAudience != "" {
+		oauth2Config.EndpointParams = url.Values{"audience": {cfg.TargetAudience}}
+	}
 
 	// JWKS for validating inbound tokens
 	jwksURL := hydraBaseURL.ResolveReference(&url.URL{Path: "/.well-known/jwks.json"}).String()
