@@ -146,3 +146,53 @@ func TestServiceClient_isTokenAllowedAccess(t *testing.T) {
 		assert.False(t, c.isTokenAllowedAccess(Permissions{PermAdmin}, claims))
 	})
 }
+
+// hydraMock serves a minimal JWKS (for construction) + a token endpoint that
+// records the client_credentials request's `audience` form param.
+func hydraMock(t *testing.T, gotAudience *string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/jwks.json":
+			_, _ = w.Write([]byte(`{"keys":[]}`))
+		case "/oauth2/token":
+			_ = r.ParseForm()
+			*gotAudience = r.Form.Get("audience")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"tok","token_type":"bearer","expires_in":3600}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+// §A-minimal: TargetAudience → the client_credentials mint requests audience=<it>
+// (so Hydra binds aud to the callee, instead of aud=[]).
+func TestServiceClient_TargetAudience_RequestsAudienceParam(t *testing.T) {
+	got := "SENTINEL"
+	srv := hydraMock(t, &got)
+	defer srv.Close()
+
+	c, err := NewServiceClient(context.Background(), Config{
+		ServerURL: srv.URL, ClientID: "cid", ClientSecret: "sec", TargetAudience: "automated-agent",
+	})
+	require.NoError(t, err)
+	_, err = c.GetAuthToken(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "automated-agent", got, "mint should request the configured target audience")
+}
+
+// No TargetAudience → no audience param (unchanged legacy behaviour).
+func TestServiceClient_NoTargetAudience_OmitsAudienceParam(t *testing.T) {
+	got := "SENTINEL"
+	srv := hydraMock(t, &got)
+	defer srv.Close()
+
+	c, err := NewServiceClient(context.Background(), Config{
+		ServerURL: srv.URL, ClientID: "cid", ClientSecret: "sec",
+	})
+	require.NoError(t, err)
+	_, err = c.GetAuthToken(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, got, "no TargetAudience → no audience param on the mint")
+}
