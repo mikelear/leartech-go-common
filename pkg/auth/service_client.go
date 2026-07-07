@@ -136,12 +136,18 @@ func (c *ServiceClient) Middleware(requiredPerms Permissions) gin.HandlerFunc {
 	}
 }
 
-// RequireScopes gates a route on the token carrying at least one of the given
-// scope(s) — config-driven service-to-service auth. Unlike Middleware (which lets
-// any internal-services token through), this requires the SPECIFIC scope, so
-// external/partner scopes stay config, not code: source `required` from config
+// RequireScopes gates a route on the token carrying AT LEAST ONE of the given
+// scope(s) — ANY-OF, not all-of. This matches our caller-type/tier scope model
+// (leartechapi / leartechapi.internal_services / …external): a caller is one
+// type, so a route listing several means "accept any of these caller types"
+// (all-of would be unsatisfiable). True all-of (e.g. future capability scopes)
+// would be a separate RequireAllScopes — don't overload this.
+//
+// Config-driven s2s auth: unlike Middleware (which lets any internal-services
+// token through), this requires the SPECIFIC configured scope, so external/
+// partner scopes stay config, not code — source `required` from config
 // (e.g. RequireScopes(NewScopes(cfg.RequiredScopes))). Fail-closed: 401 on an
-// invalid/absent token, 403 when the required scope is missing.
+// invalid/absent token, 403 when none of the required scopes is present.
 func (c *ServiceClient) RequireScopes(required Scopes) gin.HandlerFunc {
 	return func(gc *gin.Context) {
 		if c.cfg.DisableMiddleware {
