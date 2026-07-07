@@ -46,9 +46,10 @@ type ServiceAuthClient interface {
 	IsDisabled() bool
 	// Middleware validates the caller's JWT and checks required permissions.
 	Middleware(requiredPerms Permissions) gin.HandlerFunc
-	// RequireScopes validates the JWT and requires at least one of the given
-	// scopes — config-driven service-to-service auth (source `required` from
-	// config, e.g. NewScopes(cfg.RequiredScopes)).
+	// RequireScopes validates the JWT and requires AT LEAST ONE of the given
+	// scopes (any-of, not all-of — see the ServiceClient impl for rationale) —
+	// config-driven s2s auth (source `required` from config, e.g.
+	// NewScopes(cfg.RequiredScopes)).
 	RequireScopes(required Scopes) gin.HandlerFunc
 	// GetRequestTokenClaimsFromGinContext returns the caller's decoded claims.
 	GetRequestTokenClaimsFromGinContext(gc *gin.Context) (*TokenClaims, error)

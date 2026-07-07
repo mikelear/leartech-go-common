@@ -52,6 +52,12 @@ type Config struct {
 	RequiredScopes []string `env:"LEARTECH_AUTH_REQUIRED_SCOPES" envSeparator:"," yaml:"requiredScopes"`
 	// DisableMiddleware stops endpoint auth checks (local dev only, never in prod)
 	DisableMiddleware bool `yaml:"disableMiddleware"`
+	// Required makes auth mandatory (fail-closed): if set and ServerURL is empty,
+	// NewServiceClient returns an error instead of a pass-through noop client — so
+	// a service that expects to enforce auth but is mis-wired (no LEARTECH_AUTH_
+	// SERVER_URL) fails to start rather than silently accepting unvalidated tokens.
+	// Default false keeps the legacy noop-on-empty behaviour for optional-auth/dev.
+	Required bool `env:"LEARTECH_AUTH_REQUIRED" yaml:"required"`
 
 	// --- RFC 9728 OAuth 2.0 Protected Resource Metadata (opt-in) ---
 	// Populated only by resource servers (e.g. the public MCP host) that

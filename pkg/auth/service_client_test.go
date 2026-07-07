@@ -214,6 +214,21 @@ func TestServiceClient_RequireScopes(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code, "absent token is 401")
 }
 
+// Fail-closed: Required + empty ServerURL must error, never hand back a noop.
+func TestNewServiceClient_RequiredFailsClosedOnEmptyServerURL(t *testing.T) {
+	if _, err := NewServiceClient(context.Background(), Config{Required: true}); err == nil {
+		t.Fatal("Required + empty ServerURL returned no error — that's the fail-open bug")
+	}
+	// Not Required + empty ServerURL → noop (legacy optional-auth/dev), unchanged.
+	c, err := NewServiceClient(context.Background(), Config{})
+	if err != nil {
+		t.Fatalf("optional auth (empty ServerURL, not Required) errored: %v", err)
+	}
+	if !c.IsDisabled() {
+		t.Error("expected a disabled noop client when ServerURL empty + not Required")
+	}
+}
+
 func TestNewScopes(t *testing.T) {
 	got := NewScopes([]string{"leartechapi.internal_services", "  spaced  ", ""})
 	assert.Equal(t, Scopes{"leartechapi.internal_services", "spaced"}, got, "trims + drops blanks")
