@@ -28,6 +28,12 @@ type ServiceClient struct {
 // and validates incoming JWTs via JWKS.
 func NewServiceClient(ctx context.Context, cfg Config) (ServiceAuthClient, error) {
 	if cfg.ServerURL == "" {
+		// Fail-closed: if a service declares auth Required but is mis-wired with no
+		// ServerURL, refuse to start rather than hand back a pass-through noop
+		// client that would accept every unvalidated token.
+		if cfg.Required {
+			return nil, fmt.Errorf("auth is Required but LEARTECH_AUTH_SERVER_URL is empty: refusing to start with unvalidated (fail-open) middleware")
+		}
 		return &noopClient{}, nil
 	}
 
