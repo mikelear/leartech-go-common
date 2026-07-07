@@ -45,6 +45,11 @@ type Config struct {
 	// deploys should always set this). When unset, Middleware logs a
 	// WARN on every request so the gap is visible.
 	Audience string `env:"LEARTECH_AUTH_AUDIENCE" yaml:"audience"`
+	// RequiredScopes is the config-driven required scope(s) for inbound s2s
+	// routes, checked via RequireScopes(NewScopes(cfg.RequiredScopes)). Keeps
+	// external/partner scopes config, not code (vs the hard-coded HasInternal-
+	// Service helper). Comma-separated in env.
+	RequiredScopes []string `env:"LEARTECH_AUTH_REQUIRED_SCOPES" envSeparator:"," yaml:"requiredScopes"`
 	// DisableMiddleware stops endpoint auth checks (local dev only, never in prod)
 	DisableMiddleware bool `yaml:"disableMiddleware"`
 

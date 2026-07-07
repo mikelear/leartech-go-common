@@ -357,6 +357,59 @@ func (_c *MockServiceAuthClient_Ping_Call) RunAndReturn(run func(ctx context.Con
 	return _c
 }
 
+// RequireScopes provides a mock function for the type MockServiceAuthClient
+func (_mock *MockServiceAuthClient) RequireScopes(required Scopes) gin.HandlerFunc {
+	ret := _mock.Called(required)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequireScopes")
+	}
+
+	var r0 gin.HandlerFunc
+	if returnFunc, ok := ret.Get(0).(func(Scopes) gin.HandlerFunc); ok {
+		r0 = returnFunc(required)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(gin.HandlerFunc)
+		}
+	}
+	return r0
+}
+
+// MockServiceAuthClient_RequireScopes_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RequireScopes'
+type MockServiceAuthClient_RequireScopes_Call struct {
+	*mock.Call
+}
+
+// RequireScopes is a helper method to define mock.On call
+//   - required Scopes
+func (_e *MockServiceAuthClient_Expecter) RequireScopes(required interface{}) *MockServiceAuthClient_RequireScopes_Call {
+	return &MockServiceAuthClient_RequireScopes_Call{Call: _e.mock.On("RequireScopes", required)}
+}
+
+func (_c *MockServiceAuthClient_RequireScopes_Call) Run(run func(required Scopes)) *MockServiceAuthClient_RequireScopes_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 Scopes
+		if args[0] != nil {
+			arg0 = args[0].(Scopes)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockServiceAuthClient_RequireScopes_Call) Return(handlerFunc gin.HandlerFunc) *MockServiceAuthClient_RequireScopes_Call {
+	_c.Call.Return(handlerFunc)
+	return _c
+}
+
+func (_c *MockServiceAuthClient_RequireScopes_Call) RunAndReturn(run func(required Scopes) gin.HandlerFunc) *MockServiceAuthClient_RequireScopes_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetAuthHeader provides a mock function for the type MockServiceAuthClient
 func (_mock *MockServiceAuthClient) SetAuthHeader(ctx context.Context, req *http.Request) error {
 	ret := _mock.Called(ctx, req)

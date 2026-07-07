@@ -182,6 +182,44 @@ func TestServiceClient_TargetAudience_RequestsAudienceParam(t *testing.T) {
 	assert.Equal(t, "automated-agent", got, "mint should request the configured target audience")
 }
 
+// §B: RequireScopes gates on a config-driven required scope (IsScoped), fail-closed.
+func TestServiceClient_RequireScopes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	got := "x"
+	srv := hydraMock(t, &got)
+	defer srv.Close()
+	c, err := NewServiceClient(context.Background(), Config{ServerURL: srv.URL, ClientID: "c", ClientSecret: "s"})
+	require.NoError(t, err)
+
+	// Pre-cache claims so RequireScopes checks the scope without JWT validation.
+	run := func(tokenScopes Scopes, required Scopes) int {
+		w := httptest.NewRecorder()
+		gc, _ := gin.CreateTestContext(w)
+		gc.Request = httptest.NewRequest(http.MethodGet, "/x", nil)
+		gc.Set(TokenClaimsKey, &TokenClaims{UserID: "u", Scopes: tokenScopes})
+		c.RequireScopes(required)(gc)
+		return w.Code
+	}
+
+	assert.Equal(t, http.StatusOK, run(Scopes{ScopeInternalServices}, NewScopes([]string{"leartechapi.internal_services"})),
+		"token with the required scope passes")
+	assert.Equal(t, http.StatusForbidden, run(Scopes{ScopeAPI}, NewScopes([]string{"leartechapi.external"})),
+		"token missing the required scope is 403")
+
+	// No token at all → 401 (fail-closed).
+	w := httptest.NewRecorder()
+	gc, _ := gin.CreateTestContext(w)
+	gc.Request = httptest.NewRequest(http.MethodGet, "/x", nil)
+	c.RequireScopes(NewScopes([]string{"leartechapi.internal_services"}))(gc)
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "absent token is 401")
+}
+
+func TestNewScopes(t *testing.T) {
+	got := NewScopes([]string{"leartechapi.internal_services", "  spaced  ", ""})
+	assert.Equal(t, Scopes{"leartechapi.internal_services", "spaced"}, got, "trims + drops blanks")
+	assert.Empty(t, NewScopes(nil))
+}
+
 // No TargetAudience → no audience param (unchanged legacy behaviour).
 func TestServiceClient_NoTargetAudience_OmitsAudienceParam(t *testing.T) {
 	got := "SENTINEL"

@@ -136,6 +136,37 @@ func (c *ServiceClient) Middleware(requiredPerms Permissions) gin.HandlerFunc {
 	}
 }
 
+// RequireScopes gates a route on the token carrying at least one of the given
+// scope(s) — config-driven service-to-service auth. Unlike Middleware (which lets
+// any internal-services token through), this requires the SPECIFIC scope, so
+// external/partner scopes stay config, not code: source `required` from config
+// (e.g. RequireScopes(NewScopes(cfg.RequiredScopes))). Fail-closed: 401 on an
+// invalid/absent token, 403 when the required scope is missing.
+func (c *ServiceClient) RequireScopes(required Scopes) gin.HandlerFunc {
+	return func(gc *gin.Context) {
+		if c.cfg.DisableMiddleware {
+			gc.Next()
+			return
+		}
+		tokenClaims, err := c.GetRequestTokenClaimsFromGinContext(gc)
+		if err != nil {
+			log.Debug().Err(err).Msg("failed to decode/verify token")
+			if hint := wwwAuthenticateBearerHint(c.cfg); hint != "" {
+				gc.Header("WWW-Authenticate", hint)
+			}
+			gc.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		if !tokenClaims.Scopes.IsScoped(required) {
+			log.Debug().Msg("token missing required scope(s)")
+			gc.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		gc.Set(TokenClaimsKey, tokenClaims)
+		gc.Next()
+	}
+}
+
 // isTokenAllowedAccess checks if the token has the required permissions.
 //
 // When `requiredPerms` is nil (the `Middleware(nil)` form, which says
@@ -267,6 +298,9 @@ func (n *noopClient) HTTPClient() *http.Client                               { r
 func (n *noopClient) Ping(_ context.Context) error                           { return nil }
 
 func (n *noopClient) Middleware(_ Permissions) gin.HandlerFunc {
+	return func(gc *gin.Context) { gc.Next() }
+}
+func (n *noopClient) RequireScopes(_ Scopes) gin.HandlerFunc {
 	return func(gc *gin.Context) { gc.Next() }
 }
 
