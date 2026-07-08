@@ -153,6 +153,8 @@ func hydraMock(t *testing.T, gotAudience *string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/health/ready":
+			w.WriteHeader(http.StatusOK)
 		case "/.well-known/jwks.json":
 			_, _ = w.Write([]byte(`{"keys":[]}`))
 		case "/oauth2/token":
@@ -226,6 +228,151 @@ func TestNewServiceClient_RequiredFailsClosedOnEmptyServerURL(t *testing.T) {
 	}
 	if !c.IsDisabled() {
 		t.Error("expected a disabled noop client when ServerURL empty + not Required")
+	}
+}
+
+func newTestClient(t *testing.T, srv *httptest.Server, cfg Config) ServiceAuthClient {
+	t.Helper()
+	cfg.ServerURL = srv.URL
+	cfg.ClientID = "c"
+	cfg.ClientSecret = "s"
+	c, err := NewServiceClient(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("NewServiceClient: %v", err)
+	}
+	return c
+}
+
+func TestServiceClient_IsDisabled_And_HTTPClient(t *testing.T) {
+	got := "x"
+	srv := hydraMock(t, &got)
+	defer srv.Close()
+	if !newTestClient(t, srv, Config{DisableMiddleware: true}).IsDisabled() {
+		t.Error("DisableMiddleware=true → IsDisabled should be true")
+	}
+	c := newTestClient(t, srv, Config{})
+	if c.IsDisabled() {
+		t.Error("default → IsDisabled should be false")
+	}
+	if c.HTTPClient() == nil {
+		t.Error("HTTPClient should be non-nil")
+	}
+}
+
+func TestServiceClient_GetAuthToken_And_SetAuthHeader(t *testing.T) {
+	got := "x"
+	srv := hydraMock(t, &got)
+	defer srv.Close()
+	c := newTestClient(t, srv, Config{})
+	tok, err := c.GetAuthToken(context.Background())
+	if err != nil || tok == nil || *tok != "tok" {
+		t.Fatalf("GetAuthToken = %v (err %v); want tok", tok, err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	if err := c.SetAuthHeader(context.Background(), req); err != nil {
+		t.Fatalf("SetAuthHeader: %v", err)
+	}
+	if h := req.Header.Get(AuthorizationHeaderKey); h != "Bearer tok" {
+		t.Errorf("Authorization = %q, want Bearer tok", h)
+	}
+}
+
+func TestServiceClient_Middleware(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	got := "x"
+	srv := hydraMock(t, &got)
+	defer srv.Close()
+	c := newTestClient(t, srv, Config{})
+
+	run := func(cl ServiceAuthClient, setup func(*gin.Context)) int {
+		w := httptest.NewRecorder()
+		gc, _ := gin.CreateTestContext(w)
+		gc.Request = httptest.NewRequest(http.MethodGet, "/x", nil)
+		if setup != nil {
+			setup(gc)
+		}
+		cl.Middleware(Permissions{"Admin"})(gc)
+		return w.Code
+	}
+	// no token → 401
+	if code := run(c, nil); code != http.StatusUnauthorized {
+		t.Errorf("no token = %d, want 401", code)
+	}
+	// pre-cached claims with Admin (API scope) → pass
+	if code := run(c, func(gc *gin.Context) {
+		gc.Set(TokenClaimsKey, &TokenClaims{UserID: "u", Permissions: Permissions{"Admin"}, Scopes: Scopes{ScopeAPI}})
+	}); code != http.StatusOK {
+		t.Errorf("admin claims = %d, want 200", code)
+	}
+	// pre-cached claims lacking Admin → 403
+	if code := run(c, func(gc *gin.Context) {
+		gc.Set(TokenClaimsKey, &TokenClaims{UserID: "u", Permissions: Permissions{"User"}, Scopes: Scopes{ScopeAPI}})
+	}); code != http.StatusForbidden {
+		t.Errorf("non-admin claims = %d, want 403", code)
+	}
+	// DisableMiddleware → pass-through
+	if code := run(newTestClient(t, srv, Config{DisableMiddleware: true}), nil); code != http.StatusOK {
+		t.Errorf("DisableMiddleware = %d, want 200 pass-through", code)
+	}
+}
+
+func TestServiceClient_Middleware_BogusToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	got := "x"
+	srv := hydraMock(t, &got)
+	defer srv.Close()
+	c := newTestClient(t, srv, Config{})
+	w := httptest.NewRecorder()
+	gc, _ := gin.CreateTestContext(w)
+	gc.Request = httptest.NewRequest(http.MethodGet, "/x", nil)
+	gc.Request.Header.Set(AuthorizationHeaderKey, "Bearer not-a-real-jwt") // decodeToken must reject
+	c.Middleware(nil)(gc)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("bogus token = %d, want 401", w.Code)
+	}
+}
+
+func TestNoopClient_PassThrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	n, err := NewServiceClient(context.Background(), Config{}) // empty ServerURL → noop
+	if err != nil {
+		t.Fatalf("NewServiceClient(noop): %v", err)
+	}
+	if !n.IsDisabled() {
+		t.Error("noop IsDisabled should be true")
+	}
+	for name, h := range map[string]gin.HandlerFunc{
+		"middleware":    n.Middleware(Permissions{"Admin"}),
+		"requirescopes": n.RequireScopes(NewScopes([]string{"leartechapi"})),
+	} {
+		w := httptest.NewRecorder()
+		gc, _ := gin.CreateTestContext(w)
+		gc.Request = httptest.NewRequest(http.MethodGet, "/x", nil)
+		h(gc)
+		if w.Code != http.StatusOK {
+			t.Errorf("noop %s = %d, want 200 pass-through", name, w.Code)
+		}
+	}
+	// exercise the remaining no-op methods for coverage (no strict contract).
+	_, _ = n.GetAuthToken(context.Background())
+	_ = n.SetAuthHeader(context.Background(), httptest.NewRequest(http.MethodGet, "/x", nil))
+	_ = n.HTTPClient()
+	_ = n.Ping(context.Background())
+}
+
+func TestServiceClient_Ping(t *testing.T) {
+	got := "x"
+	srv := hydraMock(t, &got)
+	defer srv.Close()
+	if err := newTestClient(t, srv, Config{}).Ping(context.Background()); err != nil {
+		t.Errorf("Ping (health 200) = %v, want nil", err)
+	}
+	bad, err := NewServiceClient(context.Background(), Config{ServerURL: "http://127.0.0.1:0", ClientID: "c", ClientSecret: "s"})
+	if err != nil {
+		t.Fatalf("NewServiceClient: %v", err)
+	}
+	if err := bad.Ping(context.Background()); err == nil {
+		t.Error("Ping (unreachable) should error")
 	}
 }
 
