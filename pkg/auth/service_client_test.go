@@ -11,54 +11,55 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewServiceClient_EmptyServerURL_ReturnsNoop(t *testing.T) {
-	c, err := NewServiceClient(context.Background(), Config{})
-	require.NoError(t, err)
-	assert.True(t, c.IsDisabled())
+// testAudience is the inbound audience used by every hydraMock-backed test.
+// Held in a constant so a signed-JWT test that needs the same value can
+// reference it without diverging.
+const testAudience = "leartech-go-common-test"
 
-	tok, err := c.GetAuthToken(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, "", *tok)
-
-	req, _ := http.NewRequest(http.MethodGet, "http://x/y", nil)
-	require.NoError(t, c.SetAuthHeader(context.Background(), req))
-	assert.Empty(t, req.Header.Get("Authorization"))
-
-	require.NoError(t, c.Ping(context.Background()))
-	assert.NotNil(t, c.HTTPClient())
+// Fail-closed construction: every required field must be present. Empty
+// LEARTECH_AUTH_* means "auth is mis-wired" — refuse to build, never
+// silently fall back to a pass-through client.
+func TestNewServiceClient_FailsClosedOnMissingConfig(t *testing.T) {
+	full := Config{
+		ServerURL:    "https://hydra.example.com",
+		ClientID:     "c",
+		ClientSecret: "s",
+		Audience:     "svc",
+	}
+	cases := []struct {
+		name    string
+		mutate  func(Config) Config
+		wantMsg string
+	}{
+		{"empty ServerURL", func(c Config) Config { c.ServerURL = ""; return c }, "LEARTECH_AUTH_SERVER_URL"},
+		{"empty ClientID", func(c Config) Config { c.ClientID = ""; return c }, "LEARTECH_AUTH_CLIENT_ID"},
+		{"empty ClientSecret", func(c Config) Config { c.ClientSecret = ""; return c }, "LEARTECH_AUTH_CLIENT_SECRET"},
+		{"empty Audience", func(c Config) Config { c.Audience = ""; return c }, "LEARTECH_AUTH_AUDIENCE"},
+		{"all empty", func(_ Config) Config { return Config{} }, "LEARTECH_AUTH_SERVER_URL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewServiceClient(context.Background(), tc.mutate(full))
+			require.Error(t, err, "missing config must error, not return a noop client")
+			assert.Contains(t, err.Error(), tc.wantMsg)
+			assert.Contains(t, err.Error(), "auth is mandatory")
+		})
+	}
 }
 
-func TestNoopMiddleware_AlwaysPasses(t *testing.T) {
-	c, err := NewServiceClient(context.Background(), Config{})
-	require.NoError(t, err)
-
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/x", c.Middleware(Permissions{PermAdmin}), func(gc *gin.Context) {
-		gc.String(http.StatusOK, "ok")
-	})
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code, "noop middleware must permit all requests")
-}
-
-func TestNoopGetRequestTokenClaimsFromGinContext(t *testing.T) {
-	c, err := NewServiceClient(context.Background(), Config{})
-	require.NoError(t, err)
-
-	gin.SetMode(gin.TestMode)
-	gc, _ := gin.CreateTestContext(httptest.NewRecorder())
-	claims, err := c.GetRequestTokenClaimsFromGinContext(gc)
-	require.NoError(t, err)
-	assert.Equal(t, "dev-user", claims.UserID)
-	assert.Contains(t, claims.Permissions, PermAdmin)
+// The old noop-on-empty-ServerURL fallback is gone: even without Required
+// set, an empty ServerURL is a construction error. This test locks that in
+// so a future regression that reintroduces a fail-open path is caught.
+func TestNewServiceClient_NoNoopFallback(t *testing.T) {
+	_, err := NewServiceClient(context.Background(), Config{})
+	require.Error(t, err, "empty Config must error — there is no runtime disable path")
 }
 
 func TestNewServiceClient_InvalidServerURL(t *testing.T) {
 	// url.Parse only fails on extremely malformed input — control character.
-	_, err := NewServiceClient(context.Background(), Config{ServerURL: "http://\x7f"})
+	_, err := NewServiceClient(context.Background(), Config{
+		ServerURL: "http://\x7f", ClientID: "c", ClientSecret: "s", Audience: "svc",
+	})
 	require.Error(t, err)
 }
 
@@ -176,7 +177,8 @@ func TestServiceClient_TargetAudience_RequestsAudienceParam(t *testing.T) {
 	defer srv.Close()
 
 	c, err := NewServiceClient(context.Background(), Config{
-		ServerURL: srv.URL, ClientID: "cid", ClientSecret: "sec", TargetAudience: "automated-agent",
+		ServerURL: srv.URL, ClientID: "cid", ClientSecret: "sec",
+		Audience: testAudience, TargetAudience: "automated-agent",
 	})
 	require.NoError(t, err)
 	_, err = c.GetAuthToken(context.Background())
@@ -190,7 +192,9 @@ func TestServiceClient_RequireScopes(t *testing.T) {
 	got := "x"
 	srv := hydraMock(t, &got)
 	defer srv.Close()
-	c, err := NewServiceClient(context.Background(), Config{ServerURL: srv.URL, ClientID: "c", ClientSecret: "s"})
+	c, err := NewServiceClient(context.Background(), Config{
+		ServerURL: srv.URL, ClientID: "c", ClientSecret: "s", Audience: testAudience,
+	})
 	require.NoError(t, err)
 
 	// Pre-cache claims so RequireScopes checks the scope without JWT validation.
@@ -216,26 +220,14 @@ func TestServiceClient_RequireScopes(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code, "absent token is 401")
 }
 
-// Fail-closed: Required + empty ServerURL must error, never hand back a noop.
-func TestNewServiceClient_RequiredFailsClosedOnEmptyServerURL(t *testing.T) {
-	if _, err := NewServiceClient(context.Background(), Config{Required: true}); err == nil {
-		t.Fatal("Required + empty ServerURL returned no error — that's the fail-open bug")
-	}
-	// Not Required + empty ServerURL → noop (legacy optional-auth/dev), unchanged.
-	c, err := NewServiceClient(context.Background(), Config{})
-	if err != nil {
-		t.Fatalf("optional auth (empty ServerURL, not Required) errored: %v", err)
-	}
-	if !c.IsDisabled() {
-		t.Error("expected a disabled noop client when ServerURL empty + not Required")
-	}
-}
-
 func newTestClient(t *testing.T, srv *httptest.Server, cfg Config) ServiceAuthClient {
 	t.Helper()
 	cfg.ServerURL = srv.URL
 	cfg.ClientID = "c"
 	cfg.ClientSecret = "s"
+	if cfg.Audience == "" {
+		cfg.Audience = testAudience
+	}
 	c, err := NewServiceClient(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("NewServiceClient: %v", err)
@@ -243,17 +235,11 @@ func newTestClient(t *testing.T, srv *httptest.Server, cfg Config) ServiceAuthCl
 	return c
 }
 
-func TestServiceClient_IsDisabled_And_HTTPClient(t *testing.T) {
+func TestServiceClient_HTTPClient(t *testing.T) {
 	got := "x"
 	srv := hydraMock(t, &got)
 	defer srv.Close()
-	if !newTestClient(t, srv, Config{DisableMiddleware: true}).IsDisabled() {
-		t.Error("DisableMiddleware=true → IsDisabled should be true")
-	}
 	c := newTestClient(t, srv, Config{})
-	if c.IsDisabled() {
-		t.Error("default → IsDisabled should be false")
-	}
 	if c.HTTPClient() == nil {
 		t.Error("HTTPClient should be non-nil")
 	}
@@ -310,10 +296,6 @@ func TestServiceClient_Middleware(t *testing.T) {
 	}); code != http.StatusForbidden {
 		t.Errorf("non-admin claims = %d, want 403", code)
 	}
-	// DisableMiddleware → pass-through
-	if code := run(newTestClient(t, srv, Config{DisableMiddleware: true}), nil); code != http.StatusOK {
-		t.Errorf("DisableMiddleware = %d, want 200 pass-through", code)
-	}
 }
 
 func TestServiceClient_Middleware_BogusToken(t *testing.T) {
@@ -332,34 +314,6 @@ func TestServiceClient_Middleware_BogusToken(t *testing.T) {
 	}
 }
 
-func TestNoopClient_PassThrough(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	n, err := NewServiceClient(context.Background(), Config{}) // empty ServerURL → noop
-	if err != nil {
-		t.Fatalf("NewServiceClient(noop): %v", err)
-	}
-	if !n.IsDisabled() {
-		t.Error("noop IsDisabled should be true")
-	}
-	for name, h := range map[string]gin.HandlerFunc{
-		"middleware":    n.Middleware(Permissions{"Admin"}),
-		"requirescopes": n.RequireScopes(NewScopes([]string{"leartechapi"})),
-	} {
-		w := httptest.NewRecorder()
-		gc, _ := gin.CreateTestContext(w)
-		gc.Request = httptest.NewRequest(http.MethodGet, "/x", nil)
-		h(gc)
-		if w.Code != http.StatusOK {
-			t.Errorf("noop %s = %d, want 200 pass-through", name, w.Code)
-		}
-	}
-	// exercise the remaining no-op methods for coverage (no strict contract).
-	_, _ = n.GetAuthToken(context.Background())
-	_ = n.SetAuthHeader(context.Background(), httptest.NewRequest(http.MethodGet, "/x", nil))
-	_ = n.HTTPClient()
-	_ = n.Ping(context.Background())
-}
-
 func TestServiceClient_Ping(t *testing.T) {
 	got := "x"
 	srv := hydraMock(t, &got)
@@ -367,7 +321,9 @@ func TestServiceClient_Ping(t *testing.T) {
 	if err := newTestClient(t, srv, Config{}).Ping(context.Background()); err != nil {
 		t.Errorf("Ping (health 200) = %v, want nil", err)
 	}
-	bad, err := NewServiceClient(context.Background(), Config{ServerURL: "http://127.0.0.1:0", ClientID: "c", ClientSecret: "s"})
+	bad, err := NewServiceClient(context.Background(), Config{
+		ServerURL: "http://127.0.0.1:0", ClientID: "c", ClientSecret: "s", Audience: testAudience,
+	})
 	if err != nil {
 		t.Fatalf("NewServiceClient: %v", err)
 	}
@@ -382,14 +338,16 @@ func TestNewScopes(t *testing.T) {
 	assert.Empty(t, NewScopes(nil))
 }
 
-// No TargetAudience → no audience param (unchanged legacy behaviour).
+// No TargetAudience → no audience param (unchanged legacy behaviour). Note
+// that the service's OWN Audience (inbound) is still mandatory; only the
+// OUTBOUND TargetAudience is optional.
 func TestServiceClient_NoTargetAudience_OmitsAudienceParam(t *testing.T) {
 	got := "SENTINEL"
 	srv := hydraMock(t, &got)
 	defer srv.Close()
 
 	c, err := NewServiceClient(context.Background(), Config{
-		ServerURL: srv.URL, ClientID: "cid", ClientSecret: "sec",
+		ServerURL: srv.URL, ClientID: "cid", ClientSecret: "sec", Audience: testAudience,
 	})
 	require.NoError(t, err)
 	_, err = c.GetAuthToken(context.Background())

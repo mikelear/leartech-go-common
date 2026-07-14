@@ -40,10 +40,14 @@ type TokenGetter interface {
 }
 
 // ServiceAuthClient provides both inbound middleware and outbound token management.
+//
+// Auth is mandatory. There is no IsDisabled / noop / pass-through path — a
+// constructed client always enforces JWKS signature validation, audience
+// binding, and permission/scope checks on every request. To use it, the
+// caller must supply a full Config (ServerURL + ClientID + ClientSecret +
+// Audience); missing config is a construction error.
 type ServiceAuthClient interface {
 	TokenGetter
-	// IsDisabled returns true if auth is disabled (e.g. local dev).
-	IsDisabled() bool
 	// Middleware validates the caller's JWT and checks required permissions.
 	Middleware(requiredPerms Permissions) gin.HandlerFunc
 	// RequireScopes validates the JWT and requires AT LEAST ONE of the given
