@@ -2,6 +2,12 @@ package auth
 
 // Config holds authentication configuration for connecting to Hydra.
 //
+// Auth is MANDATORY. There is no runtime way to disable auth: constructing a
+// ServiceAuthClient without ServerURL, ClientID, ClientSecret, or Audience
+// returns an error and refuses to start. This is a deliberate hard contract
+// so a mis-wired service fails at boot rather than silently accepting
+// unvalidated tokens.
+//
 // Environment variables (set via Kubernetes secrets from ExternalSecrets):
 //
 //	env:
@@ -20,12 +26,18 @@ package auth
 //	    secretKeyRef:
 //	      key: CLIENT_SECRET
 //	      name: backend-service-oauth
+//	- name: LEARTECH_AUTH_AUDIENCE
+//	  value: "<this-service-name>"
 type Config struct {
-	// ServerURL is the Hydra public URL for the cluster (set via LEARTECH_AUTH_SERVER_URL).
+	// ServerURL is the Hydra public URL for the cluster (set via
+	// LEARTECH_AUTH_SERVER_URL). Used as the issuer and the JWKS source.
+	// REQUIRED — empty at construction returns an error.
 	ServerURL string `env:"LEARTECH_AUTH_SERVER_URL" yaml:"serverURL"`
-	// ClientID for the OAuth2 client_credentials flow
+	// ClientID for the OAuth2 client_credentials flow. REQUIRED — empty at
+	// construction returns an error.
 	ClientID string `env:"LEARTECH_AUTH_CLIENT_ID" yaml:"clientID"`
-	// ClientSecret for the OAuth2 client_credentials flow
+	// ClientSecret for the OAuth2 client_credentials flow. REQUIRED — empty
+	// at construction returns an error.
 	ClientSecret string `env:"LEARTECH_AUTH_CLIENT_SECRET" yaml:"clientSecret"`
 	// TargetAudience is the OUTBOUND audience requested when minting a
 	// client_credentials token (RFC 8707) — the callee this service calls.
@@ -40,24 +52,16 @@ type Config struct {
 	// they're signed by the same Hydra. Mirrors rust + dotnet templates'
 	// audience-binding behaviour.
 	//
-	// Empty string disables aud validation (legacy lenient behaviour;
-	// allowed for backwards-compat during rollout, but production
-	// deploys should always set this). When unset, Middleware logs a
-	// WARN on every request so the gap is visible.
+	// REQUIRED — empty at construction returns an error. The historical
+	// lenient "warn and accept" behaviour was removed as part of the auth
+	// hardening (A1): a mis-configured audience must fail-closed at boot,
+	// never fail-open at runtime.
 	Audience string `env:"LEARTECH_AUTH_AUDIENCE" yaml:"audience"`
 	// RequiredScopes is the config-driven required scope(s) for inbound s2s
 	// routes, checked via RequireScopes(NewScopes(cfg.RequiredScopes)). Keeps
 	// external/partner scopes config, not code (vs the hard-coded HasInternal-
 	// Service helper). Comma-separated in env.
 	RequiredScopes []string `env:"LEARTECH_AUTH_REQUIRED_SCOPES" envSeparator:"," yaml:"requiredScopes"`
-	// DisableMiddleware stops endpoint auth checks (local dev only, never in prod)
-	DisableMiddleware bool `yaml:"disableMiddleware"`
-	// Required makes auth mandatory (fail-closed): if set and ServerURL is empty,
-	// NewServiceClient returns an error instead of a pass-through noop client — so
-	// a service that expects to enforce auth but is mis-wired (no LEARTECH_AUTH_
-	// SERVER_URL) fails to start rather than silently accepting unvalidated tokens.
-	// Default false keeps the legacy noop-on-empty behaviour for optional-auth/dev.
-	Required bool `env:"LEARTECH_AUTH_REQUIRED" yaml:"required"`
 
 	// --- RFC 9728 OAuth 2.0 Protected Resource Metadata (opt-in) ---
 	// Populated only by resource servers (e.g. the public MCP host) that

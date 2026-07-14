@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -26,15 +27,19 @@ type ServiceClient struct {
 
 // NewServiceClient creates a ServiceAuthClient that authenticates with Hydra
 // and validates incoming JWTs via JWKS.
+//
+// Fail-closed contract (auth-hardening A1):
+//
+//   - ServerURL, ClientID, ClientSecret, and Audience are ALL required. If any
+//     is empty, this returns an error and the caller MUST NOT run — there is
+//     no noop / pass-through / disabled fallback, and no configuration flag
+//     that makes the middleware a runtime no-op.
+//   - Callers cannot ignore the error and end up with an unauthenticated
+//     service: the returned client validates JWKS signatures and RFC 8707
+//     audience binding on every request.
 func NewServiceClient(ctx context.Context, cfg Config) (ServiceAuthClient, error) {
-	if cfg.ServerURL == "" {
-		// Fail-closed: if a service declares auth Required but is mis-wired with no
-		// ServerURL, refuse to start rather than hand back a pass-through noop
-		// client that would accept every unvalidated token.
-		if cfg.Required {
-			return nil, fmt.Errorf("auth is Required but LEARTECH_AUTH_SERVER_URL is empty: refusing to start with unvalidated (fail-open) middleware")
-		}
-		return &noopClient{}, nil
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
 	}
 
 	hydraBaseURL, err := url.Parse(cfg.ServerURL)
@@ -76,9 +81,30 @@ func NewServiceClient(ctx context.Context, cfg Config) (ServiceAuthClient, error
 	}, nil
 }
 
-// IsDisabled returns true if auth middleware is disabled (local dev).
-func (c *ServiceClient) IsDisabled() bool {
-	return c.cfg.DisableMiddleware
+// validateConfig enforces the fail-closed construction contract: every field
+// that would otherwise leave the middleware in an unauthenticated state must
+// be set. Returns a single error listing every missing field so operators see
+// the whole gap in one boot log, instead of chasing one env-var at a time.
+func validateConfig(cfg Config) error {
+	var missing []string
+	if cfg.ServerURL == "" {
+		missing = append(missing, "LEARTECH_AUTH_SERVER_URL")
+	}
+	if cfg.ClientID == "" {
+		missing = append(missing, "LEARTECH_AUTH_CLIENT_ID")
+	}
+	if cfg.ClientSecret == "" {
+		missing = append(missing, "LEARTECH_AUTH_CLIENT_SECRET")
+	}
+	if cfg.Audience == "" {
+		missing = append(missing, "LEARTECH_AUTH_AUDIENCE")
+	}
+	if len(missing) > 0 {
+		return errors.New("auth: refusing to start — required config missing: " +
+			strings.Join(missing, ", ") +
+			" (auth is mandatory; there is no runtime disable path)")
+	}
+	return nil
 }
 
 // GetAuthToken returns the current cached token, refreshing if expired.
@@ -106,7 +132,11 @@ func (c *ServiceClient) HTTPClient() *http.Client {
 	return c.httpClient
 }
 
-// Middleware validates the caller's JWT and checks permissions.
+// Middleware validates the caller's JWT and checks permissions. There is NO
+// disable / bypass path — if the token is missing, mis-signed, mis-audienced
+// or lacks the required permissions the request is rejected. Callers wanting
+// unauthenticated infra routes (health, openapi, /.well-known/*) simply do
+// not attach this middleware to those handlers.
 //
 // Usage:
 //
@@ -115,11 +145,6 @@ func (c *ServiceClient) HTTPClient() *http.Client {
 //	router.GET("/api/internal", client.Middleware(nil), handler) // any valid token
 func (c *ServiceClient) Middleware(requiredPerms Permissions) gin.HandlerFunc {
 	return func(gc *gin.Context) {
-		if c.cfg.DisableMiddleware {
-			gc.Next()
-			return
-		}
-
 		tokenClaims, err := c.GetRequestTokenClaimsFromGinContext(gc)
 		if err != nil {
 			log.Debug().Err(err).Msg("failed to decode/verify token")
@@ -156,10 +181,6 @@ func (c *ServiceClient) Middleware(requiredPerms Permissions) gin.HandlerFunc {
 // invalid/absent token, 403 when none of the required scopes is present.
 func (c *ServiceClient) RequireScopes(required Scopes) gin.HandlerFunc {
 	return func(gc *gin.Context) {
-		if c.cfg.DisableMiddleware {
-			gc.Next()
-			return
-		}
 		tokenClaims, err := c.GetRequestTokenClaimsFromGinContext(gc)
 		if err != nil {
 			log.Debug().Err(err).Msg("failed to decode/verify token")
@@ -243,20 +264,11 @@ func (c *ServiceClient) decodeToken(tokenStr string) (*TokenClaims, error) {
 		return nil, fmt.Errorf("token is invalid")
 	}
 
-	// RFC 8707 audience binding: when Audience is configured, the token's
-	// `aud` claim must contain this service's name. Rust + .NET templates
-	// already enforce this strictly; go-common was historically lenient
-	// (no aud check at all), which masked broken audience-propagation in
-	// the auth chain (see leartech-ts-common#12 — token refresh dropped
-	// audience= and only go-template still accepted the resulting empty
-	// aud token).
-	if c.cfg.Audience != "" {
-		if err := validateAudience(claims, c.cfg.Audience); err != nil {
-			return nil, fmt.Errorf("audience validation failed: %w", err)
-		}
-	} else {
-		// Log once so operators see the gap. Don't fail-open silently.
-		log.Warn().Msg("auth: LEARTECH_AUTH_AUDIENCE not set — accepting any token's aud claim. Set this in production to enforce RFC 8707 audience binding.")
+	// RFC 8707 audience binding. Audience is guaranteed non-empty by
+	// validateConfig at construction, so this always enforces — matching
+	// rust + dotnet templates. There is no lenient / opt-out path.
+	if err := validateAudience(claims, c.cfg.Audience); err != nil {
+		return nil, fmt.Errorf("audience validation failed: %w", err)
 	}
 
 	return NewTokenClaimsFromMapClaims(claims)
@@ -298,24 +310,4 @@ func getTokenFromHeader(header string) (string, error) {
 		return "", fmt.Errorf("invalid Authorization header format")
 	}
 	return parts[1], nil
-}
-
-// noopClient is returned when ServerURL is empty (local dev, no auth).
-type noopClient struct{}
-
-func (n *noopClient) IsDisabled() bool                                       { return true }
-func (n *noopClient) GetAuthToken(_ context.Context) (*string, error)        { s := ""; return &s, nil }
-func (n *noopClient) SetAuthHeader(_ context.Context, _ *http.Request) error { return nil }
-func (n *noopClient) HTTPClient() *http.Client                               { return http.DefaultClient }
-func (n *noopClient) Ping(_ context.Context) error                           { return nil }
-
-func (n *noopClient) Middleware(_ Permissions) gin.HandlerFunc {
-	return func(gc *gin.Context) { gc.Next() }
-}
-func (n *noopClient) RequireScopes(_ Scopes) gin.HandlerFunc {
-	return func(gc *gin.Context) { gc.Next() }
-}
-
-func (n *noopClient) GetRequestTokenClaimsFromGinContext(_ *gin.Context) (*TokenClaims, error) {
-	return &TokenClaims{UserID: "dev-user", Scopes: Scopes{ScopeAPI}, Permissions: Permissions{PermAdmin}}, nil
 }
