@@ -2,18 +2,38 @@
 // (validate caller tokens via JWKS) and outbound token management
 // (client_credentials flow for service-to-service calls).
 //
-// Usage:
+// Two role-specific constructors, chosen by what the service does:
+//
+//   - Pure resource server (validate only, no outbound calls) — use
+//     NewVerifier + Middleware(verifier, ...). Requires only issuer +
+//     audience. Ideal for MCP hosts, catalog-mcp, and any service that
+//     enforces auth on inbound traffic without minting tokens itself.
+//   - Combined role (validate inbound + mint outbound) — use
+//     NewServiceClient + client.Middleware(...). Requires the full
+//     Config (ServerURL + ClientID + ClientSecret + Audience). A service
+//     that BOTH accepts inbound traffic AND calls other services
+//     constructs one of each; the two roles fail-closed independently.
+//
+// Both paths are fail-closed at construction: missing required config is a
+// startup error, not a runtime-disabled fallback.
+//
+// Usage (validate-only resource server):
+//
+//	verifier, err := auth.NewVerifier(ctx, auth.VerifierConfig{
+//	    Issuer:   os.Getenv("LEARTECH_AUTH_ISSUER"),
+//	    Audience: os.Getenv("LEARTECH_AUTH_AUDIENCE"),
+//	})
+//	router.GET("/api/things", auth.Middleware(verifier, auth.Permissions{"User"}), handler)
+//
+// Usage (combined validate + mint):
 //
 //	client, err := auth.NewServiceClient(ctx, auth.Config{
 //	    ServerURL:    os.Getenv("LEARTECH_AUTH_SERVER_URL"),
 //	    ClientID:     os.Getenv("LEARTECH_AUTH_CLIENT_ID"),
 //	    ClientSecret: os.Getenv("LEARTECH_AUTH_CLIENT_SECRET"),
+//	    Audience:     os.Getenv("LEARTECH_AUTH_AUDIENCE"),
 //	})
-//
-//	// Inbound: protect endpoints
 //	router.GET("/api/things", client.Middleware(auth.Permissions{"User"}), handler)
-//
-//	// Outbound: call another service
 //	httpClient := client.HTTPClient()
 package auth
 

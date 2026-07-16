@@ -211,12 +211,13 @@ func (c *ServiceClient) RequireScopes(required Scopes) gin.HandlerFunc {
 // When `requiredPerms` is non-empty, the token must either:
 //   - have the internal-services scope (full S2S access), OR
 //   - have the API scope AND match at least one required permission
+//
+// Delegates to the package-level isTokenAllowedAccess (verifier.go) so the
+// ServiceClient and Verifier middleware paths never drift. Kept as a method
+// here because existing tests (service_client_test.go) exercise it through a
+// *ServiceClient receiver.
 func (c *ServiceClient) isTokenAllowedAccess(requiredPerms Permissions, claims *TokenClaims) bool {
-	if len(requiredPerms) == 0 {
-		return true
-	}
-	return claims.Scopes.HasInternalService() ||
-		(claims.Scopes.HasAPI() && claims.Permissions.IsPermitted(requiredPerms))
+	return isTokenAllowedAccess(requiredPerms, claims)
 }
 
 // GetRequestTokenClaimsFromGinContext extracts and decodes the JWT from
