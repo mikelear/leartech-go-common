@@ -2,6 +2,7 @@ package auth
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,6 +23,19 @@ type ProtectedResourceMetadata struct {
 	// AuthorizationServers is the list of issuer URLs that can issue tokens
 	// for this resource. REQUIRED for the helper to be useful.
 	AuthorizationServers []string `json:"authorization_servers"`
+	// ScopesSupported lists the scopes a client must request in order to use
+	// this resource (RFC 9728 §3.1 `scopes_supported`). OPTIONAL in the RFC,
+	// omitted when empty — but omitting it has a concrete cost.
+	//
+	// WHY IT MATTERS. A well-behaved client requests exactly what discovery
+	// advertises. With this absent, clients fall back to the AUTHORISATION
+	// SERVER's `scopes_supported`, and Hydra advertises only
+	// openid/offline/offline_access — it knows nothing of custom scopes. A
+	// native MCP client therefore registered with three OIDC scopes and was
+	// refused 403 by every leartechapi:*-gated route. The scopes were
+	// enforced but never published, leaving callers no way to discover them
+	// short of reading Go source or inferring from a 403.
+	ScopesSupported []string `json:"scopes_supported,omitempty"`
 }
 
 // NewProtectedResourceMetadata builds a metadata document from the supplied
@@ -35,9 +49,12 @@ func NewProtectedResourceMetadata(cfg Config) *ProtectedResourceMetadata {
 	// through the returned struct.
 	servers := make([]string, len(cfg.AuthorizationServers))
 	copy(servers, cfg.AuthorizationServers)
+	scopes := make([]string, len(cfg.ScopesSupported))
+	copy(scopes, cfg.ScopesSupported)
 	return &ProtectedResourceMetadata{
 		Resource:             cfg.Resource,
 		AuthorizationServers: servers,
+		ScopesSupported:      scopes,
 	}
 }
 
@@ -67,9 +84,18 @@ func ResourceMetadataHandler(cfg Config) gin.HandlerFunc {
 // hint per RFC 9728 §5.1, or "" when no resource_metadata URL is configured.
 // Empty string means "do not emit the header" — the existing 401 behaviour
 // is preserved for consumers that don't opt in.
+// It also carries `scope=` (RFC 6750 §3) when ScopesSupported is configured, so
+// a client that gets a 401 learns what to ask for from the response itself
+// rather than having to fetch and parse the metadata document. Belt and braces
+// with the document: the two are built from the same config, so they cannot
+// disagree.
 func wwwAuthenticateBearerHint(cfg Config) string {
 	if cfg.ResourceMetadataURL == "" {
 		return ""
 	}
-	return `Bearer resource_metadata="` + cfg.ResourceMetadataURL + `"`
+	hint := `Bearer resource_metadata="` + cfg.ResourceMetadataURL + `"`
+	if len(cfg.ScopesSupported) > 0 {
+		hint += `, scope="` + strings.Join(cfg.ScopesSupported, " ") + `"`
+	}
+	return hint
 }
