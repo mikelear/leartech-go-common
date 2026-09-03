@@ -78,4 +78,15 @@ type Config struct {
 	// document; when set, Middleware emits it as the WWW-Authenticate
 	// `resource_metadata=` hint on 401 (RFC 9728 §5.1).
 	ResourceMetadataURL string `env:"LEARTECH_AUTH_RESOURCE_METADATA_URL" yaml:"resourceMetadataURL"`
+	// ScopesSupported are the scopes a client must request to use this
+	// resource (RFC 9728 §3.1 `scopes_supported`), published in the metadata
+	// document and echoed as `scope=` on the 401 challenge.
+	//
+	// Set this to the scopes the service ACTUALLY enforces. Hydra's own
+	// discovery advertises only openid/offline/offline_access and cannot know
+	// about custom scopes, so without this a conforming client has no way to
+	// learn what to request — it registers with the OIDC basics and is then
+	// refused by every scope-gated route. Derive it from the same constants
+	// the route gates use; a hand-kept second list is how the two drift.
+	ScopesSupported []string `env:"LEARTECH_AUTH_SCOPES_SUPPORTED" envSeparator:"," yaml:"scopesSupported"`
 }
