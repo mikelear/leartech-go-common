@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,26 @@ type ServiceClient struct {
 	tokenSource oauth2.TokenSource
 	healthURL   string
 	httpClient  *http.Client
+
+	// oauthCfg is the client_credentials config WITHOUT an audience endpoint
+	// param, so a per-audience source can be derived from it. tokenSource
+	// above stays the cfg.TargetAudience one, which is what GetAuthToken and
+	// HTTPClient continue to use.
+	oauthCfg clientcredentials.Config
+
+	// baseCtx is the construction context, used when creating per-audience
+	// token sources.
+	//
+	// It is stored deliberately. oauth2's ReuseTokenSource captures the
+	// context it was built with and uses it for REFRESH requests, so building
+	// a cached source from a per-call context would tie every future refresh
+	// to a request that has already returned — the token would stop refreshing
+	// the moment that request's context was cancelled. The existing
+	// tokenSource above is built the same way.
+	baseCtx context.Context //nolint:containedctx // see above: refresh lifetime
+
+	audMu      sync.Mutex
+	audSources map[string]oauth2.TokenSource
 }
 
 // NewServiceClient creates a ServiceAuthClient that authenticates with Hydra
@@ -71,6 +92,11 @@ func NewServiceClient(ctx context.Context, cfg Config) (ServiceAuthClient, error
 		return nil, fmt.Errorf("failed to create JWKS keyfunc from %s: %w", jwksURL, err)
 	}
 
+	// base is oauth2Config WITHOUT the audience endpoint param, so
+	// GetAuthTokenForAudience can derive a source per callee from it.
+	base := oauth2Config
+	base.EndpointParams = nil
+
 	httpClient := oauth2Config.Client(ctx)
 	return &ServiceClient{
 		cfg:         cfg,
@@ -78,6 +104,9 @@ func NewServiceClient(ctx context.Context, cfg Config) (ServiceAuthClient, error
 		tokenSource: oauth2Config.TokenSource(ctx),
 		httpClient:  httpClient,
 		healthURL:   hydraBaseURL.ResolveReference(&url.URL{Path: "/health/ready"}).String(),
+		oauthCfg:    base,
+		baseCtx:     ctx,
+		audSources:  map[string]oauth2.TokenSource{},
 	}, nil
 }
 
