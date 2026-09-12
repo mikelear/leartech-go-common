@@ -2,6 +2,8 @@ module github.com/mikelear/leartech-go-common
 
 go 1.25.0
 
+toolchain go1.26.6
+
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.0
 	github.com/alicebob/miniredis/v2 v2.38.0
