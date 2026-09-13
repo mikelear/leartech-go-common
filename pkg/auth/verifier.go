@@ -53,9 +53,10 @@ type VerifierConfig struct {
 	JWKSURL string `env:"LEARTECH_AUTH_JWKS_URL" yaml:"jwksURL"`
 	// KnownScopes is the capability-scope vocabulary THIS service enforces.
 	// RequireScope panics at wiring on anything outside it, so a typo cannot
-	// reach a running pod, and UngatedScopes reports the entries no route
-	// gates on. Empty is legal: a service with no capability scopes simply
-	// never calls RequireScope.
+	// reach a running pod.  proven-by: TestRequireScope_PanicsOnAScopeTheServiceNeverDeclared
+	// UngatedScopes reports the entries no route gates on.
+	// proven-by: TestUngatedScopes_FindsDeclaredScopesNoRouteEnforces
+	// Empty is legal.  proven-by: TestUngatedScopes_EmptyVocabularyIsEmpty
 	KnownScopes Scopes `yaml:"knownScopes"`
 	// ResourceMetadataURL and ScopesSupported feed the RFC 9728
 	// WWW-Authenticate hint the gate emits on 401. Empty = no hint.

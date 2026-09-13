@@ -16,8 +16,8 @@ import (
 //
 // That one hangs off ServiceClient, and every service has migrated to
 // Verifier — so the shared scope gate has been unreachable from where callers
-// actually stand. Its zero call sites were never neglect. artifact-api wrote
-// its own; mcp-servers built a different shape again.
+// actually stand, which is the likeliest reason it has no callers. artifact-api
+// wrote its own; mcp-servers built a different shape again.
 //
 // The semantics differ by design, too. ServiceClient.RequireScopes is ANY-OF,
 // which is right for caller-type scopes (leartechapi /
@@ -29,10 +29,10 @@ import (
 // visibly different at the call site instead of subtly different inside one
 // function.
 //
-// # Unknown scopes cannot reach a running pod
+// # Unknown scopes cannot reach a running pod  proven-by: TestRequireScope_PanicsOnAScopeTheServiceNeverDeclared
 //
 // required must appear in VerifierConfig.KnownScopes, and this PANICS at
-// construction when it does not. Route wiring returns no error, and the
+// construction when it does not.  proven-by: TestRequireScope_PanicsOnAScopeTheServiceNeverDeclared Route wiring returns no error, and the
 // estate's posture for auth misconfiguration is already refuse-to-start: a
 // missing issuer fails the pod at boot, and a route gated on a scope nothing
 // can grant is the same category of mistake. Without this, a typo compiles,
@@ -47,15 +47,14 @@ import (
 //
 // # Status codes are fixed
 //
-// 401 when the token is absent, unverifiable or for the wrong audience — with
-// the RFC 9728 WWW-Authenticate hint when one is configured, so a client can
-// discover what to ask for. 403 when the token is valid and lacks the scope,
-// with NO hint: the caller authenticated fine and pointing them at resource
-// metadata would invite a re-registration that cannot help.
+// 401 when the token is absent, unverifiable or for the wrong audience, with
+// the RFC 9728 WWW-Authenticate hint when one is configured. 403 when the token
+// is valid and lacks the scope, with NO hint — the caller authenticated fine and
+// re-registering cannot help.  proven-by: TestRequireScope_401CarriesTheDiscoveryHint_403DoesNot
 //
-// Neither is configurable. Three refusal codes stay distinguishable only
-// because each is fixed; the moment a status is a knob, a dashboard cannot
-// tell a misconfiguration from an outage.
+// Neither is configurable: three refusal codes stay distinguishable only while
+// each is fixed, and a knob lets a dashboard confuse a misconfiguration with an
+// outage.  proven-by: TestRequireScope_401CarriesTheDiscoveryHint_403DoesNot
 func (v *Verifier) RequireScope(required Scope, opts ...GateOption) gin.HandlerFunc {
 	if required == "" {
 		panic("auth: RequireScope called with an empty scope")
@@ -97,9 +96,9 @@ func (v *Verifier) RequireScope(required Scope, opts ...GateOption) gin.HandlerF
 //
 // Deliberately empty today. The gateway's credential-method constraint (JWT
 // vs sk-lt- virtual key) is expected to live on the SCOPE rather than here:
-// keys_read is JWT-only wherever it appears, across three call sites, and a
-// route-level option is three places to remember it while a scope-level
-// property cannot be forgotten and is inherited by any new route naming it.
+// keys_read is JWT-only wherever it appears, across three call sites, so a
+// route-level option would be three places to remember it. That is ai-gateway's
+// design note rather than a property of this package.
 type GateOption func(*gateConfig)
 
 type gateConfig struct{}
@@ -126,8 +125,8 @@ func (v *Verifier) markGated(s Scope) {
 // routes, and the two ways it can drift are not equally loud:
 //
 //	gated on but not declared -> RequireScope panics at wiring. LOUD.
-//	declared but never gated  -> published, provisioned, enforced by nothing.
-//	                             SILENT.
+//	declared but never gated  -> published, enforced by nothing. SILENT.
+//	                             proven-by: TestUngatedScopes_FindsDeclaredScopesNoRouteEnforces
 //
 // The silent one is the enforce/publish seam inverted: a client requests the
 // scope, is granted it, and gains nothing; an operator provisioning from the
@@ -153,9 +152,8 @@ func (v *Verifier) UngatedScopes() Scopes {
 
 // bearerHint builds the RFC 9728 WWW-Authenticate hint from the verifier's own
 // config. Kept in the gate rather than left to callers: ServiceClient already
-// emits it (service_client.go), and discovery depends on resource_metadata
-// being right, so N callers getting it subtly wrong is N clients that cannot
-// discover what to ask for.
+// emits it (service_client.go), and discovery depends on resource_metadata being
+// right.  proven-by: TestRequireScope_401CarriesTheDiscoveryHint_403DoesNot
 func (v *Verifier) bearerHint() string {
 	return wwwAuthenticateBearerHint(Config{
 		ResourceMetadataURL: v.cfg.ResourceMetadataURL,
