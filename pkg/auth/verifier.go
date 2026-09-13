@@ -51,6 +51,16 @@ type VerifierConfig struct {
 	// JWKS location. Useful for tests (httptest server) and for issuers that
 	// advertise their JWKS at a non-standard path. Empty = derive from Issuer.
 	JWKSURL string `env:"LEARTECH_AUTH_JWKS_URL" yaml:"jwksURL"`
+	// KnownScopes is the capability-scope vocabulary THIS service enforces.
+	// RequireScope panics at wiring on anything outside it, so a typo cannot
+	// reach a running pod, and UngatedScopes reports the entries no route
+	// gates on. Empty is legal: a service with no capability scopes simply
+	// never calls RequireScope.
+	KnownScopes Scopes `yaml:"knownScopes"`
+	// ResourceMetadataURL and ScopesSupported feed the RFC 9728
+	// WWW-Authenticate hint the gate emits on 401. Empty = no hint.
+	ResourceMetadataURL string   `env:"LEARTECH_AUTH_RESOURCE_METADATA_URL" yaml:"resourceMetadataURL"`
+	ScopesSupported     []string `yaml:"scopesSupported"`
 }
 
 // Verifier validates inbound JWTs (signature via JWKS + expiry + issuer +
@@ -68,6 +78,9 @@ type VerifierConfig struct {
 type Verifier struct {
 	cfg         VerifierConfig
 	jwksKeyFunc keyfunc.Keyfunc
+	// gated records which KnownScopes a route actually gates on, so the
+	// declared-but-unenforced half can be found. See UngatedScopes.
+	gated gatedScopes
 }
 
 // NewVerifier constructs an inbound-only Verifier from the given
