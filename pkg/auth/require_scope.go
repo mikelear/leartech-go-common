@@ -31,8 +31,9 @@ import (
 //
 // # Unknown scopes cannot reach a running pod  proven-by: TestRequireScope_PanicsOnAScopeTheServiceNeverDeclared
 //
-// required must appear in VerifierConfig.KnownScopes, and this PANICS at
-// construction when it does not.  proven-by: TestRequireScope_PanicsOnAScopeTheServiceNeverDeclared Route wiring returns no error, and the
+// required must be in KnownScopes, and this PANICS otherwise.  proven-by: TestRequireScope_PanicsOnAScopeTheServiceNeverDeclared
+//
+// The panic is at construction, not per request. Route wiring returns no error, and the
 // estate's posture for auth misconfiguration is already refuse-to-start: a
 // missing issuer fails the pod at boot, and a route gated on a scope nothing
 // can grant is the same category of mistake. Without this, a typo compiles,
@@ -125,8 +126,7 @@ func (v *Verifier) markGated(s Scope) {
 // routes, and the two ways it can drift are not equally loud:
 //
 //	gated on but not declared -> RequireScope panics at wiring. LOUD.
-//	declared but never gated  -> published, enforced by nothing. SILENT.
-//	                             proven-by: TestUngatedScopes_FindsDeclaredScopesNoRouteEnforces
+//	declared but never gated  -> enforced by nothing. SILENT.  proven-by: TestUngatedScopes_FindsDeclaredScopesNoRouteEnforces
 //
 // The silent one is the enforce/publish seam inverted: a client requests the
 // scope, is granted it, and gains nothing; an operator provisioning from the

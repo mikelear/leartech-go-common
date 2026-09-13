@@ -52,8 +52,8 @@ type VerifierConfig struct {
 	// advertise their JWKS at a non-standard path. Empty = derive from Issuer.
 	JWKSURL string `env:"LEARTECH_AUTH_JWKS_URL" yaml:"jwksURL"`
 	// KnownScopes is the capability-scope vocabulary THIS service enforces.
-	// RequireScope panics at wiring on anything outside it, so a typo cannot
-	// reach a running pod.  proven-by: TestRequireScope_PanicsOnAScopeTheServiceNeverDeclared
+	// RequireScope panics at wiring on anything outside it.  proven-by: TestRequireScope_PanicsOnAScopeTheServiceNeverDeclared
+	// A typo therefore cannot reach a running pod.
 	// UngatedScopes reports the entries no route gates on.
 	// proven-by: TestUngatedScopes_FindsDeclaredScopesNoRouteEnforces
 	// Empty is legal.  proven-by: TestUngatedScopes_EmptyVocabularyIsEmpty
