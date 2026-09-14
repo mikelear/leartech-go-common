@@ -209,24 +209,28 @@ func (v *Verifier) GatedScopes() Scopes {
 // Each pairing fails silently and differently, which is why they are reported
 // separately rather than as one count.
 type ScopeSurface struct {
-	// DeclaredNotGated: in KnownScopes, gated by no route. Enforced by
-	// nothing. The scope exists in provisioning and protects nothing.
+	// DeclaredNotGated: in KnownScopes, gated by no route — so it is enforced
+	// by nothing, and exists in provisioning while protecting nothing.
+	// proven-by: TestUngatedScopes_FindsDeclaredScopesNoRouteEnforces
 	DeclaredNotGated Scopes
 
-	// PublishedNotGated: advertised in scopes_supported, gated by no route.
-	// A client reads discovery, dutifully requests the scope, and receives a
+	// PublishedNotGated: advertised in scopes_supported, gated by no route, so
+	// a client reads discovery, dutifully requests the scope, and receives a
 	// token whose extra scope protects nothing — over-granting caused by the
 	// resource server's own metadata.
+	// proven-by: TestScopeSurface_FindsAnAdvertisedScopeThatGatesNothing
 	PublishedNotGated []string
 
 	// GatedNotPublished: enforced by a route, absent from scopes_supported.
-	// The worst of the three. A caller cannot discover the scope it needs:
-	// discovery does not list it and the WWW-Authenticate hint built from
-	// ScopesSupported does not name it, so the 403 is unactionable.
+	// The worst of the three. Discovery does not list the scope, and the
+	// WWW-Authenticate hint is built from ScopesSupported so it does not name
+	// it either, which leaves the caller holding a 403 it cannot act on.  proven-by: TestScopeSurface_FindsAScopeEnforcedButNeverAdvertised
+	// proven-by: TestScopeSurface_NoAdvertisedScopesMeansEveryGateIsUndiscoverable
 	GatedNotPublished Scopes
 }
 
 // Empty reports whether all three lists agree.
+// proven-by: TestScopeSurface_AgreesWhenTheThreeListsMatch
 func (s ScopeSurface) Empty() bool {
 	return len(s.DeclaredNotGated) == 0 &&
 		len(s.PublishedNotGated) == 0 &&
