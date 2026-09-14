@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -179,4 +180,121 @@ func formatScopes(ss Scopes) string {
 		out += string(s)
 	}
 	return out + "]"
+}
+
+// GatedScopes returns the KnownScopes that some route actually gates on — the
+// set this service ENFORCES, as opposed to the set it declares (KnownScopes) or
+// the set it advertises to clients (Config.ScopesSupported).
+//
+// UngatedScopes answers "what did I declare and never use". This answers "what
+// do I actually require", which is the question the issuer needs answered: a
+// scope this service enforces but the issuer will not grant is a route no
+// caller can ever reach, and it fails as a 403 that looks exactly like a
+// correctly-refused request.  proven-by: TestGatedScopes_ReportsWhatRoutesActuallyEnforce
+func (v *Verifier) GatedScopes() Scopes {
+	v.gated.mu.Lock()
+	defer v.gated.mu.Unlock()
+	var out Scopes
+	for _, s := range v.cfg.KnownScopes {
+		if _, ok := v.gated.seen[s]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// ScopeSurface is the disagreement between the three lists a resource server
+// keeps about its own scopes. They are maintained in different places and
+// nothing has ever compared them:
+//
+//	KnownScopes           declared in VerifierConfig, in code
+//	routes                what RequireScope actually gates, in code
+//	Config.ScopesSupported advertised at /.well-known/oauth-protected-resource,
+//	                      from LEARTECH_AUTH_SCOPES_SUPPORTED — an env var
+//
+// Each pairing fails silently and differently, which is why they are reported
+// separately rather than as one count.
+type ScopeSurface struct {
+	// DeclaredNotGated: in KnownScopes, gated by no route — so it is enforced
+	// by nothing, and exists in provisioning while protecting nothing.
+	// proven-by: TestUngatedScopes_FindsDeclaredScopesNoRouteEnforces
+	DeclaredNotGated Scopes
+
+	// PublishedNotGated: advertised in scopes_supported, gated by no route, so
+	// a client reads discovery, dutifully requests the scope, and receives a
+	// token whose extra scope protects nothing — over-granting caused by the
+	// resource server's own metadata.
+	// proven-by: TestScopeSurface_FindsAnAdvertisedScopeThatGatesNothing
+	PublishedNotGated []string
+
+	// GatedNotPublished: enforced by a route, absent from scopes_supported.
+	// The worst of the three. Discovery does not list the scope, and the
+	// WWW-Authenticate hint is built from ScopesSupported so it does not name
+	// it either, which leaves the caller holding a 403 it cannot act on.  proven-by: TestScopeSurface_FindsAScopeEnforcedButNeverAdvertised
+	// proven-by: TestScopeSurface_NoAdvertisedScopesMeansEveryGateIsUndiscoverable
+	GatedNotPublished Scopes
+}
+
+// Empty reports whether all three lists agree.
+// proven-by: TestScopeSurface_AgreesWhenTheThreeListsMatch
+func (s ScopeSurface) Empty() bool {
+	return len(s.DeclaredNotGated) == 0 &&
+		len(s.PublishedNotGated) == 0 &&
+		len(s.GatedNotPublished) == 0
+}
+
+// ScopeSurface compares the three lists. Call it from a test AFTER wiring every
+// route — before the routes exist, everything reads as ungated and the result
+// is noise rather than a finding.
+//
+// This is the enforcement half of the enforce/issue seam. The issuance half
+// (will the issuer actually grant GatedScopes?) needs a running issuer and so
+// belongs in an end2end suite; this half is a unit test, and being a unit test
+// it runs on every PR rather than only where a preview exists.
+func (v *Verifier) ScopeSurface() ScopeSurface {
+	gated := make(map[Scope]struct{}, len(v.cfg.KnownScopes))
+	for _, s := range v.GatedScopes() {
+		gated[s] = struct{}{}
+	}
+	published := make(map[string]struct{}, len(v.cfg.ScopesSupported))
+	for _, s := range v.cfg.ScopesSupported {
+		published[s] = struct{}{}
+	}
+
+	out := ScopeSurface{DeclaredNotGated: v.UngatedScopes()}
+	for _, s := range v.cfg.ScopesSupported {
+		if _, ok := gated[Scope(s)]; !ok {
+			out.PublishedNotGated = append(out.PublishedNotGated, s)
+		}
+	}
+	for _, s := range v.GatedScopes() {
+		if _, ok := published[string(s)]; !ok {
+			out.GatedNotPublished = append(out.GatedNotPublished, s)
+		}
+	}
+	return out
+}
+
+// String renders the disagreement as something a failing test can print
+// verbatim, naming the consequence rather than only the difference.
+func (s ScopeSurface) String() string {
+	if s.Empty() {
+		return "scope surface agrees: declared, gated and published are the same set"
+	}
+	out := ""
+	if len(s.DeclaredNotGated) > 0 {
+		out += "\n  declared but gated by no route " + formatScopes(s.DeclaredNotGated) +
+			"\n    -> enforced by nothing; provisioned and protecting nothing"
+	}
+	if len(s.PublishedNotGated) > 0 {
+		out += "\n  advertised in scopes_supported but gated by no route [" +
+			strings.Join(s.PublishedNotGated, " ") + "]" +
+			"\n    -> clients are told to request a scope that protects nothing"
+	}
+	if len(s.GatedNotPublished) > 0 {
+		out += "\n  gated by a route but absent from scopes_supported " + formatScopes(s.GatedNotPublished) +
+			"\n    -> callers cannot discover it: neither discovery nor the" +
+			"\n       WWW-Authenticate hint names it, so the 403 is unactionable"
+	}
+	return out
 }
