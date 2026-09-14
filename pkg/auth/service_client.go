@@ -208,6 +208,15 @@ func (c *ServiceClient) Middleware(requiredPerms Permissions) gin.HandlerFunc {
 // partner scopes stay config, not code — source `required` from config
 // (e.g. RequireScopes(NewScopes(cfg.RequiredScopes))). Fail-closed: 401 on an
 // invalid/absent token, 403 when none of the required scopes is present.
+// Deprecated: use (*Verifier).RequireScope for capability scopes. The two names
+// now sit one character apart and differ in BOTH semantics and base type:
+// RequireScopes is ANY-OF over caller-type scopes on *ServiceClient, which does
+// not validate iss; RequireScope is an exact capability check on *Verifier,
+// which does. Before RequireScope existed this one was self-limiting because it
+// was unreachable from Verifier — now it is one autocomplete away, and choosing
+// it by accident silently drops issuer validation. Kept for config-driven
+// external/partner caller-type gating, which RequireScope deliberately does not
+// cover.
 func (c *ServiceClient) RequireScopes(required Scopes) gin.HandlerFunc {
 	return func(gc *gin.Context) {
 		tokenClaims, err := c.GetRequestTokenClaimsFromGinContext(gc)

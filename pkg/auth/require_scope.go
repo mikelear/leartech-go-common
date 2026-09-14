@@ -57,6 +57,12 @@ import (
 // each is fixed, and a knob lets a dashboard confuse a misconfiguration with an
 // outage.  proven-by: TestRequireScope_401CarriesTheDiscoveryHint_403DoesNot
 func (v *Verifier) RequireScope(required Scope, opts ...GateOption) gin.HandlerFunc {
+	if v == nil {
+		panic("auth: RequireScope(" + string(required) + ") called on a nil *Verifier. " +
+			"A service that builds its verifier only when an issuer is configured will " +
+			"reach this with auth switched off; the route would then be wired to a gate " +
+			"that cannot check anything. Build the Verifier, or do not gate the route.")
+	}
 	if required == "" {
 		panic("auth: RequireScope called with an empty scope")
 	}
