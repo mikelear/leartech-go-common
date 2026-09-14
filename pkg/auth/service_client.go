@@ -208,6 +208,7 @@ func (c *ServiceClient) Middleware(requiredPerms Permissions) gin.HandlerFunc {
 // partner scopes stay config, not code — source `required` from config
 // (e.g. RequireScopes(NewScopes(cfg.RequiredScopes))). Fail-closed: 401 on an
 // invalid/absent token, 403 when none of the required scopes is present.
+//
 // Deprecated: use (*Verifier).RequireScope for capability scopes. The two names
 // now sit one character apart and differ in BOTH semantics and base type:
 // RequireScopes is ANY-OF over caller-type scopes on *ServiceClient, which does
