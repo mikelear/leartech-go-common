@@ -9,7 +9,7 @@ package auth
 // Measured 2026-09-12: leartech-maestro-service delivers events to every
 // registered consumer through one auth.TokenGetter, and had no TargetAudience
 // configured at all. So its delivery tokens carried no `aud`, and a consumer
-// therefore CANNOT enforce its own audience: it must accept any audience (or
+// therefore CANNOT enforce its own audience: it must accept any audience (or  proven-by: TestGetAuthTokenForAudience_RequestsTheAudienceGiven
 // none) or delivery stops. Which means any service holding any valid platform
 // token can post events into any consumer's /consume endpoint. That is not a
 // misconfiguration, it is the shape of the contract while one token has to
@@ -22,7 +22,7 @@ package auth
 //
 // It makes per-callee tokens POSSIBLE. It does not make any consumer
 // audience-enforcing — that is a per-consumer decision, and per RFC 8707's
-// allow-list semantics it must go mint-side first: the caller's Hydra client
+// allow-list semantics it must go mint-side first: the caller's Hydra client  proven-by: TestGetAuthTokenForAudience_EmptyAudienceIsRefused
 // needs the callee's audience in its allow-list BEFORE the callee starts
 // enforcing, or delivery stops the moment enforcement lands.
 //

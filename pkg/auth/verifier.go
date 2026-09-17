@@ -15,7 +15,7 @@ import (
 )
 
 // VerifierConfig holds inbound-only auth configuration for a pure resource
-// server — a service that validates incoming JWTs but never mints tokens of
+// server — a service that validates incoming JWTs but never mints tokens of  proven-by: TestNewVerifier_NoClientCredsRequired
 // its own. It carries ONLY the fields needed to verify a bearer token:
 // issuer + audience (+ an optional explicit JWKSURL for tests / non-standard
 // issuers).
@@ -44,7 +44,7 @@ type VerifierConfig struct {
 	// `/.well-known/jwks.json` against this, unless JWKSURL is set explicitly.
 	Issuer string `env:"LEARTECH_AUTH_ISSUER" yaml:"issuer"`
 	// Audience is this resource server's audience identifier (RFC 8707).
-	// Inbound tokens must carry it in their `aud` claim, otherwise they are
+	// Inbound tokens must carry it in their `aud` claim, otherwise they are  proven-by: TestVerifier_DecodeToken_WrongAudience
 	// rejected. REQUIRED — empty at construction returns an error.
 	Audience string `env:"LEARTECH_AUTH_AUDIENCE" yaml:"audience"`
 	// JWKSURL, when set, overrides the derived Issuer + "/.well-known/jwks.json"
@@ -71,7 +71,7 @@ type VerifierConfig struct {
 // mis-configured resource server refuses to boot rather than silently
 // accepting unvalidated tokens.
 //
-// Verifier NEVER mints outbound tokens: no client_id / client_secret /
+// Verifier NEVER mints outbound tokens: no client_id / client_secret /  proven-by: TestNewVerifier_NoClientCredsRequired
 // TokenSource. Services that also need to call other services construct a
 // Verifier for inbound + a ServiceAuthClient for outbound; the two roles are
 // separately configured and separately fail-closed.
@@ -85,7 +85,7 @@ type Verifier struct {
 
 // NewVerifier constructs an inbound-only Verifier from the given
 // VerifierConfig. Returns an error when Issuer or Audience is empty, when the
-// derived JWKS URL is unparseable, or when the JWKS keyfunc can't be built.
+// derived JWKS URL is unparseable, or when the JWKS keyfunc can't be built.  proven-by: TestNewVerifier_InvalidIssuerURL
 //
 // The ctx is currently unused (the JWKS keyfunc runs its own background
 // refresh loop) but is accepted for symmetry with NewServiceClient and to
@@ -156,16 +156,17 @@ func (v *Verifier) DecodeToken(tokenStr string) (*TokenClaims, error) {
 		return nil, fmt.Errorf("token is invalid")
 	}
 
-	// RFC 7519 §4.1.1 issuer binding. Enforced always — the whole point of an
+	// RFC 7519 §4.1.1 issuer binding. Enforced always  proven-by: TestValidateIssuer
+	// — the whole point of an
 	// inbound-only Verifier is that its trust root is a specific issuer. A
-	// token signed by a foreign issuer with a matching JWKS key must not be
+	// token signed by a foreign issuer with a matching JWKS key must not be  proven-by: TestVerifier_DecodeToken_WrongIssuer
 	// accepted just because the signature happens to verify.
 	if err := validateIssuer(claims, v.cfg.Issuer); err != nil {
 		return nil, fmt.Errorf("issuer validation failed: %w", err)
 	}
 
 	// RFC 8707 audience binding. Audience is guaranteed non-empty by
-	// validateVerifierConfig at construction, so this always enforces.
+	// validateVerifierConfig at construction, so this always enforces.  proven-by: TestNewVerifier_FailsClosedOnMissingConfig
 	if err := validateAudience(claims, v.cfg.Audience); err != nil {
 		return nil, fmt.Errorf("audience validation failed: %w", err)
 	}
@@ -220,7 +221,7 @@ func validateIssuer(claims jwt.MapClaims, expected string) error {
 // The permission-check semantics mirror ServiceClient.Middleware exactly:
 //   - requiredPerms == nil / empty → any audience-validated signed token
 //     passes (matches rust + dotnet AuthLayer);
-//   - otherwise the token must either carry the internal-services scope OR
+//   - otherwise the token must either carry the internal-services scope OR  proven-by: TestMiddleware_MissingPerm403
 //     the API scope with at least one required permission.
 //
 // If the caller wants to attach an RFC 9728 WWW-Authenticate hint on 401,
@@ -266,7 +267,7 @@ func middlewareWithHint(verifier *Verifier, requiredPerms Permissions, hint stri
 
 // isTokenAllowedAccess is the free-function twin of ServiceClient.isTokenAllowedAccess.
 // Kept as a free function (not a Verifier method) because it depends only on
-// the claims + required perms — never on JWKS / issuer / audience state — and
+// the claims + required perms — never on JWKS / issuer / audience state — and  proven-by: TestIsTokenAllowedAccess_IgnoresVerifierState
 // is shared verbatim between the ServiceClient and Verifier middleware paths.
 func isTokenAllowedAccess(requiredPerms Permissions, claims *TokenClaims) bool {
 	if len(requiredPerms) == 0 {
