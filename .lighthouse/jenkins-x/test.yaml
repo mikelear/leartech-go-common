@@ -22,11 +22,34 @@ spec:
           # go-common's code lives under ./pkg/..., so the gate scope
           # is overridden from the default ./internal/...
           #
-          # Floor 60% matches the leartech golden-service standard.
-          # Backfill landed via task #130 (pkg/redis 100%, pkg/logger 100%,
-          # pkg/httptools 91%, pkg/queue 86%, pkg/lock 80%, pkg/tracing 80%,
-          # pkg/auth 57%, pkg/mongo 32%, pkg/mongo/migration 18%).
-          # Total ~63%. Delta-coverage gate enforces no future regression.
+          # THESE NUMBERS WERE THE RAW ONES, AND THE FLOOR WAS SET FROM THEM.
+          #
+          # leartech-go.mk strips generated files from the profile before it
+          # computes the total (strip_generated, matching the standard
+          # `// Code generated ... DO NOT EDIT.` header). A plain local
+          # `go test -cover` does not, so the two disagree — and the figures
+          # recorded here were the local ones.
+          #
+          # Measured 2026-09-17, both ways:
+          #
+          #   raw (local go test -cover)   62.9%
+          #   stripped (what CI computes)  86.2%
+          #
+          # Per package, as the gate sees it:
+          #
+          #   pkg/logger 100%   pkg/redis 100%   pkg/queue 90.6%
+          #   pkg/lock 90%      pkg/httptools 87.5%
+          #   pkg/auth 95.8% mean over 48 funcs, none below 50%
+          #   pkg/mongo/migration 80%   pkg/tracing 64.7%
+          #   pkg/mongo 5.8% mean, 14 of 15 funcs below 50%
+          #
+          # So pkg/auth was not the thin one — the generated mock deflated
+          # it. pkg/mongo genuinely is.
+          #
+          # THRESHOLD LEFT AT 60 DELIBERATELY. The real total is 86.2%, so
+          # this floor carries ~26 points of slack. Raising it is a policy
+          # call rather than a correction, and wants deciding on its own. The
+          # delta-vs-base gate still catches a regression from any single PR.
           env:
           - name: COVERAGE_SCOPE
             value: "./pkg/..."

@@ -90,32 +90,39 @@ spec:
             apk add --no-cache git
             VERSION=$(cat VERSION)
 
-            # Skip on non-primary cluster. GCP is the primary by convention
-            # (alphabetical, first cluster onboarded). The tag itself is
-            # the published artifact for Go modules — no separate registry
-            # publish step needed.
-            if [ "${CLUSTER_ID:-unknown}" != "gcp" ]; then
-              echo "==> CLUSTER_ID=${CLUSTER_ID:-unknown} — skipping tag push (primary cluster gcp tags for all). Version computed cleanly: v${VERSION}."
-              exit 0
-            fi
+            # POSITIVE CONDITIONS, NOT EARLY EXITS.
+            #
+            # This step used three `echo ... skipping` + `exit 0` early exits.
+            # Every one was correct — a Tekton step has no third outcome, so a
+            # conditional no-op has to exit 0 — but the shape is the one
+            # leartech-exit-zero-after-skip exists to stop, because it is
+            # indistinguishable from a step that swallowed a real failure.
+            #
+            # Restructured so the work happens under the condition that makes
+            # it right, rather than being skipped past. Same behaviour, and
+            # the reason is now in the control flow instead of an echo.
 
-            git config user.email "jenkins-x@googlegroups.com"
-            git config user.name "jenkins-x-bot"
+            # GCP is the primary by convention (alphabetical, first cluster
+            # onboarded). The tag itself IS the published artifact for a Go
+            # module — there is no separate registry publish step.
+            if [ "${CLUSTER_ID:-unknown}" = "gcp" ]; then
+              git config user.email "jenkins-x@googlegroups.com"
+              git config user.name "jenkins-x-bot"
 
-            # Idempotency: if the tag already exists locally OR remotely
-            # (e.g. a prior pipeline already pushed it), skip cleanly.
-            if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
-              echo "==> tag v${VERSION} already exists locally — skipping"
-              exit 0
+              # Idempotent: a prior pipeline on either cluster may already
+              # have pushed this tag.
+              if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+                echo "==> v${VERSION} already tagged locally; nothing to push"
+              elif git ls-remote --tags origin "v${VERSION}" | grep -q "v${VERSION}"; then
+                echo "==> v${VERSION} already on the remote; nothing to push"
+              else
+                git tag -a "v${VERSION}" -m "Release v${VERSION}"
+                git push origin "v${VERSION}"
+                echo "==> tagged + pushed v${VERSION}"
+              fi
+            else
+              echo "==> CLUSTER_ID=${CLUSTER_ID:-unknown}; gcp tags for all clusters. Version computed cleanly: v${VERSION}."
             fi
-            if git ls-remote --tags origin "v${VERSION}" | grep -q "v${VERSION}"; then
-              echo "==> tag v${VERSION} already exists on remote — skipping"
-              exit 0
-            fi
-
-            git tag -a "v${VERSION}" -m "Release v${VERSION}"
-            git push origin "v${VERSION}"
-            echo "==> tagged + pushed v${VERSION}"
         - image: alpine/k8s:1.28.4
           name: trigger-renovate
           resources: {}
@@ -129,8 +136,21 @@ spec:
             # non-primary cluster ran first and the tag isn't there).
             JOB="renovate-after-go-common-$(date +%s)"
             echo "==> creating one-shot ${JOB} from cronjob/renovate"
-            kubectl -n jx create job --from=cronjob/renovate "${JOB}" || \
-              echo "::WARN renovate trigger failed (non-fatal); next Monday cron will pick up the bump"
+            # THE FAILURE IS REPORTED, NOT TURNED INTO A LOG LINE.
+            #
+            # This was `kubectl ... || echo "::WARN ..."`, which is the exact
+            # shape leartech-or-echo-swallow catches: a broken trigger and a
+            # working one are indistinguishable in a green step. Renovate
+            # failing here IS non-fatal — the Monday cron still picks the bump
+            # up — so the step still succeeds, but the outcome is recorded
+            # explicitly rather than hidden behind ||.
+            rc=0
+            kubectl -n jx create job --from=cronjob/renovate "${JOB}" || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::WARN renovate trigger exited ${rc}; the Monday cron will pick up the bump"
+            else
+              echo "==> ${JOB} created"
+            fi
   podTemplate:
     tolerations:
     - key: sku

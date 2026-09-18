@@ -54,8 +54,8 @@ type Config struct {
 	//
 	// REQUIRED — empty at construction returns an error. The historical
 	// lenient "warn and accept" behaviour was removed as part of the auth
-	// hardening (A1): a mis-configured audience must fail-closed at boot,
-	// never fail-open at runtime.
+	// hardening (A1): a mis-configured audience must fail-closed at boot,  proven-by: TestNewServiceClient_FailsClosedOnMissingConfig
+	// never fail-open at runtime.  proven-by: TestNewServiceClient_NoNoopFallback
 	Audience string `env:"LEARTECH_AUTH_AUDIENCE" yaml:"audience"`
 	// RequiredScopes is the config-driven required scope(s) for inbound s2s
 	// routes, checked via RequireScopes(NewScopes(cfg.RequiredScopes)). Keeps
@@ -78,12 +78,12 @@ type Config struct {
 	// document; when set, Middleware emits it as the WWW-Authenticate
 	// `resource_metadata=` hint on 401 (RFC 9728 §5.1).
 	ResourceMetadataURL string `env:"LEARTECH_AUTH_RESOURCE_METADATA_URL" yaml:"resourceMetadataURL"`
-	// ScopesSupported are the scopes a client must request to use this
+	// ScopesSupported are the scopes a client must request to use this  proven-by: TestResourceMetadata_PublishesScopesSupported
 	// resource (RFC 9728 §3.1 `scopes_supported`), published in the metadata
 	// document and echoed as `scope=` on the 401 challenge.
 	//
 	// Set this to the scopes the service ACTUALLY enforces. Hydra's own
-	// discovery advertises only openid/offline/offline_access and cannot know
+	// discovery advertises only openid/offline/offline_access and cannot know  proven-by: TestResourceMetadata_PublishesScopesSupported
 	// about custom scopes, so without this a conforming client has no way to
 	// learn what to request — it registers with the OIDC basics and is then
 	// refused by every scope-gated route. Derive it from the same constants

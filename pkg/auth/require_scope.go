@@ -186,7 +186,7 @@ func formatScopes(ss Scopes) string {
 // set this service ENFORCES, as opposed to the set it declares (KnownScopes) or
 // the set it advertises to clients (Config.ScopesSupported).
 //
-// UngatedScopes answers "what did I declare and never use". This answers "what
+// UngatedScopes answers "what did I declare and never use". This answers "what  proven-by: TestGatedScopes_ReportsWhatRoutesActuallyEnforce
 // do I actually require", which is the question the issuer needs answered: a
 // scope this service enforces but the issuer will not grant is a route no
 // caller can ever reach, and it fails as a 403 that looks exactly like a

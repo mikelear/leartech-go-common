@@ -52,10 +52,11 @@ type ServiceClient struct {
 // Fail-closed contract (auth-hardening A1):
 //
 //   - ServerURL, ClientID, ClientSecret, and Audience are ALL required. If any
-//     is empty, this returns an error and the caller MUST NOT run — there is
+//     is empty, this returns an error and the caller MUST NOT run  proven-by: TestNewServiceClient_FailsClosedOnMissingConfig
+//     — there is
 //     no noop / pass-through / disabled fallback, and no configuration flag
 //     that makes the middleware a runtime no-op.
-//   - Callers cannot ignore the error and end up with an unauthenticated
+//   - Callers cannot ignore the error and end up with an unauthenticated  proven-by: TestNewServiceClient_NoNoopFallback
 //     service: the returned client validates JWKS signatures and RFC 8707
 //     audience binding on every request.
 func NewServiceClient(ctx context.Context, cfg Config) (ServiceAuthClient, error) {
@@ -111,7 +112,7 @@ func NewServiceClient(ctx context.Context, cfg Config) (ServiceAuthClient, error
 }
 
 // validateConfig enforces the fail-closed construction contract: every field
-// that would otherwise leave the middleware in an unauthenticated state must
+// that would otherwise leave the middleware in an unauthenticated state must  proven-by: TestNewServiceClient_InvalidServerURL
 // be set. Returns a single error listing every missing field so operators see
 // the whole gap in one boot log, instead of chasing one env-var at a time.
 func validateConfig(cfg Config) error {
@@ -247,12 +248,13 @@ func (c *ServiceClient) RequireScopes(required Scopes) gin.HandlerFunc {
 // PKCE user tokens with only `openid offline` scopes (the SPA pattern)
 // are accepted here.
 //
-// When `requiredPerms` is non-empty, the token must either:
+// When `requiredPerms` is non-empty, the token must either:  proven-by: TestServiceClient_isTokenAllowedAccess
 //   - have the internal-services scope (full S2S access), OR
 //   - have the API scope AND match at least one required permission
 //
 // Delegates to the package-level isTokenAllowedAccess (verifier.go) so the
-// ServiceClient and Verifier middleware paths never drift. Kept as a method
+// ServiceClient and Verifier middleware paths never drift  proven-by: TestBothMiddlewarePathsShareOneDecision
+// Kept as a method
 // here because existing tests (service_client_test.go) exercise it through a
 // *ServiceClient receiver.
 func (c *ServiceClient) isTokenAllowedAccess(requiredPerms Permissions, claims *TokenClaims) bool {
@@ -305,7 +307,8 @@ func (c *ServiceClient) decodeToken(tokenStr string) (*TokenClaims, error) {
 	}
 
 	// RFC 8707 audience binding. Audience is guaranteed non-empty by
-	// validateConfig at construction, so this always enforces — matching
+	// validateConfig at construction, so this always enforces  proven-by: TestNewServiceClient_FailsClosedOnMissingConfig
+	// — matching
 	// rust + dotnet templates. There is no lenient / opt-out path.
 	if err := validateAudience(claims, c.cfg.Audience); err != nil {
 		return nil, fmt.Errorf("audience validation failed: %w", err)

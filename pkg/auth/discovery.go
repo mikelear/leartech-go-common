@@ -23,7 +23,7 @@ type ProtectedResourceMetadata struct {
 	// AuthorizationServers is the list of issuer URLs that can issue tokens
 	// for this resource. REQUIRED for the helper to be useful.
 	AuthorizationServers []string `json:"authorization_servers"`
-	// ScopesSupported lists the scopes a client must request in order to use
+	// ScopesSupported lists the scopes a client must request in order to use  proven-by: TestResourceMetadata_PublishesScopesSupported
 	// this resource (RFC 9728 §3.1 `scopes_supported`). OPTIONAL in the RFC,
 	// omitted when empty — but omitting it has a concrete cost.
 	//
@@ -33,19 +33,19 @@ type ProtectedResourceMetadata struct {
 	// openid/offline/offline_access — it knows nothing of custom scopes. A
 	// native MCP client therefore registered with three OIDC scopes and was
 	// refused 403 by every leartechapi:*-gated route. The scopes were
-	// enforced but never published, leaving callers no way to discover them
+	// enforced but never published, leaving callers no way to discover them  proven-by: TestScopeSurface_FindsAScopeEnforcedButNeverAdvertised
 	// short of reading Go source or inferring from a 403.
 	ScopesSupported []string `json:"scopes_supported,omitempty"`
 }
 
 // NewProtectedResourceMetadata builds a metadata document from the supplied
 // config. Returns nil if discovery is not configured (Resource or
-// AuthorizationServers empty) — callers MUST treat that as "discovery off".
+// AuthorizationServers empty) — callers MUST treat that as "discovery off".  proven-by: TestResourceMetadata_OmitsScopesWhenUnset
 func NewProtectedResourceMetadata(cfg Config) *ProtectedResourceMetadata {
 	if cfg.Resource == "" || len(cfg.AuthorizationServers) == 0 {
 		return nil
 	}
-	// Defensive copy of the slice so callers can't mutate the source config
+	// Defensive copy of the slice so callers can't mutate the source config  proven-by: TestResourceMetadata_ScopesAreDefensivelyCopied
 	// through the returned struct.
 	servers := make([]string, len(cfg.AuthorizationServers))
 	copy(servers, cfg.AuthorizationServers)
@@ -87,7 +87,7 @@ func ResourceMetadataHandler(cfg Config) gin.HandlerFunc {
 // It also carries `scope=` (RFC 6750 §3) when ScopesSupported is configured, so
 // a client that gets a 401 learns what to ask for from the response itself
 // rather than having to fetch and parse the metadata document. Belt and braces
-// with the document: the two are built from the same config, so they cannot
+// with the document: the two are built from the same config, so they cannot  proven-by: TestHintAndDocumentAdvertiseTheSameScopes
 // disagree.
 func wwwAuthenticateBearerHint(cfg Config) string {
 	if cfg.ResourceMetadataURL == "" {
