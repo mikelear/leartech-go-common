@@ -46,15 +46,34 @@ spec:
           # So pkg/auth was not the thin one — the generated mock deflated
           # it. pkg/mongo genuinely is.
           #
-          # THRESHOLD LEFT AT 60 DELIBERATELY. The real total is 86.2%, so
-          # this floor carries ~26 points of slack. Raising it is a policy
-          # call rather than a correction, and wants deciding on its own. The
-          # delta-vs-base gate still catches a regression from any single PR.
+          # FLOOR 85, SET FROM THE NUMBER THE GATE ACTUALLY COMPUTES.
+          #
+          # It was 60 against a real 86.2% — about 26 points of slack, enough
+          # for pkg/auth to lose a third of its coverage without failing. That
+          # floor was not chosen badly; it was chosen from the RAW figures
+          # recorded above, which nobody re-derived after the strip was added.
+          #
+          # 85 leaves ~1.2 points of headroom, which is deliberately tight:
+          # this library is the estate's auth vocabulary and a real drop
+          # should fail rather than be absorbed. The delta-vs-base gate
+          # remains the finer instrument — it catches a regression inside a
+          # single PR even when the total stays above the floor.
+          #
+          # If this starts failing on an honest change, re-measure the way CI
+          # does before lowering it:
+          #
+          #   go test ./pkg/... -coverpkg=./pkg/... -coverprofile=c.out
+          #   grep -vFf <(grep -rlE '^// Code generated .* DO NOT EDIT\.$' \
+          #     --include='*.go' . | sed 's#^./##') c.out > s.out
+          #   go tool cover -func=s.out | awk '/^total:/{print $3}'
+          #
+          # A plain `go test -cover` reports ~63% and is not what the gate
+          # sees.
           env:
           - name: COVERAGE_SCOPE
             value: "./pkg/..."
           - name: COVERAGE_THRESHOLD
-            value: "60.0"
+            value: "85.0"
         steps:
         - name: ""
           resources: {}
