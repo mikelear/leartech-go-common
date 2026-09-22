@@ -10,7 +10,7 @@ LEARTECH_GO_MK_REF ?= main
 LEARTECH_GO_MK_URL ?= https://raw.githubusercontent.com/mikelear/leartech-pipeline-catalog/$(LEARTECH_GO_MK_REF)/go/leartech-go.mk
 LEARTECH_GO_MK     := .leartech-go.mk
 
-# THESE MUST MATCH .lighthouse/jenkins-x/test.yaml.
+# THESE MUST MATCH .lighthouse/jenkins-x/test.yaml. # proven-by: TestMakefileCoverageSettingsMatchCI
 #
 # The golden mk defaults to COVERAGE_SCOPE=./internal/... and this repo has no
 # internal/. Verified 2026-09-22 by running it: the default scope reports
