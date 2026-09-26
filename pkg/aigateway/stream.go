@@ -114,34 +114,28 @@ type sseFrame struct {
 // proven-by: TestChatStream_ATruncatedStreamIsAnErrorNotACleanEnd
 // proven-by: TestChatStream_TheChannelAlwaysCloses
 func (c *Client) ChatStream(ctx context.Context, req ChatRequest) (<-chan StreamChunk, error) {
-	body, err := json.Marshal(streamRequest{
-		ChatRequest:   req,
-		Stream:        true,
-		StreamOptions: &streamOptions{IncludeUsage: true},
-	})
+	// SAME BUILDER AS THE NON-STREAMING PATH. Only Accept differs, because
+	// only Accept has to.
+	httpReq, err := c.newRequest(ctx, http.MethodPost, chatPath, "text/event-stream",
+		streamRequest{
+			ChatRequest:   req,
+			Stream:        true,
+			StreamOptions: &streamOptions{IncludeUsage: true},
+		})
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(c.base, "/")+"/v1/chat/completions", strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
-	httpReq.Header.Set("Authorization", "Bearer "+c.token)
-	c.stamp(httpReq.Header)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
 		// Scrubbed, as the non-streaming path does. A transport error can
 		// quote the request, and the request carries the key.
-		return nil, fmt.Errorf("gateway: POST /v1/chat/completions (stream): %w", c.scrubErr(err))
+		return nil, fmt.Errorf("gateway: POST %s (stream): %w", chatPath, c.scrubErr(err))
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer func() { _ = resp.Body.Close() }()
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return nil, c.statusError(http.MethodPost, "/v1/chat/completions (stream)",
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+		return nil, c.statusError(http.MethodPost, chatPath+" (stream)",
 			resp.StatusCode, raw)
 	}
 

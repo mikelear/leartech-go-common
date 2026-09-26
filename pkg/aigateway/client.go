@@ -199,38 +199,76 @@ func (e apiError) errorText() string {
 	return e.Message
 }
 
-func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+// chatPath is the completions endpoint, named once so the streaming and
+// non-streaming paths post to the same place. // proven-by: TestChatPaths_PostToTheSameEndpoint
+const chatPath = "/v1/chat/completions"
 
+// maxErrorBody bounds how much of a failing response is read back.
+//
+// ONE FIGURE FOR BOTH PATHS. They had 8 MiB and 1 MiB, for no reason either
+// could state — the kind of difference that appears when two call sites
+// build the same request twice.
+const maxErrorBody = 8 << 20
+
+// newRequest builds an authenticated, correlated request.
+//
+// THE ONE PLACE EITHER CHAT PATH BUILDS A REQUEST. Chat went through do and
+// ChatStream built its own, and they drifted in ways neither call site
+// could see:
+//
+//   - do refused an empty credential BEFORE sending; ChatStream sent
+//     "Authorization: Bearer " and let the gateway answer 401, so the same
+//     mistake surfaced as a local error on one path and a remote auth
+//     failure on the other
+//   - they read back 8 MiB and 1 MiB of a failing response
+//   - ChatStream re-trimmed a base URL that New had already trimmed,
+//     distrusting a guarantee the constructor makes
+//
+// accept differs by necessity — a stream is text/event-stream — and that is
+// the only thing a caller may vary.
+//
+// proven-by: TestNewRequest_RefusesAnEmptyCredentialBeforeSending
+// proven-by: TestNewRequest_StampsAuthAcceptAndCorrelation
+// proven-by: TestChatStream_RefusesAnEmptyCredentialBeforeSending
+func (c *Client) newRequest(ctx context.Context, method, path, accept string, body any) (*http.Request, error) {
 	if c.token == "" {
-		return ErrNoCredential
+		return nil, ErrNoCredential
 	}
 
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("gateway: encode the request: %w", err)
+			return nil, fmt.Errorf("gateway: encode the request: %w", err)
 		}
 		rdr = bytes.NewReader(b)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rdr)
 	if err != nil {
-		return fmt.Errorf("gateway: build the request: %w", err)
+		return nil, fmt.Errorf("gateway: build the request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", accept)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	c.stamp(req.Header)
+	return req, nil
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	req, err := c.newRequest(ctx, method, path, "application/json", body)
+	if err != nil {
+		return err
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("gateway: %s %s: %w", method, path, c.scrubErr(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 	if err != nil {
 		return fmt.Errorf("gateway: read %s %s: %w", method, path, err)
 	}
