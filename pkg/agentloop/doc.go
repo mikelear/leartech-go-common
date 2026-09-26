@@ -31,16 +31,16 @@
 //
 // Session registration, slash commands and model selection are likewise a
 // consumer's business — [Runner.Intercept] is the hook for the second, and
-// it exists so this package never learns what a command is.
+// an intercepted line never reaches the model. // proven-by: TestRunner_AnInterceptedLineNeverReachesTheModel_Library
 //
 // THE GATE IS NOT OPTIONAL AND NOT ADVISORY. Every tool call passes
 // through [Policy] before it runs, including MCP calls, and the decision
 // is made in one place rather than inside each tool — when the rooting
-// lived in the tools, glob remembered to skip .git and read_file did not.
-// Reads are allowed, writes and executes reach Ask and never Allow, and an
-// Ask with nobody to answer is a refusal rather than an invented yes. An
-// unattended caller pre-seeds the answers it is willing to give; it does
-// not widen the gate.
+// lived in the tools, glob remembered to skip .git and read_file did not. // proven-by: TestRegistry_EveryCallPassesTheGate
+//
+// An Ask with nobody to answer is a refusal rather than an invented yes. // proven-by: TestRegistry_AnAskWithNobodyToAskIsRefused
+// An unattended caller pre-seeds the answers it is willing to give; it
+// does not widen the gate.
 //
 // USAGE. Build a [Registry], govern it, and hand it to a [Runner] along
 // with an [aigateway.Client] and a [Lines]:
