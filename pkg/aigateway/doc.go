@@ -49,9 +49,9 @@
 // for a virtual key, and refuses a caller whose cap it fails to resolve
 // rather than treating it as unlimited — so a JWT gets a caller
 // authenticated and then refused at the spend gate, which reads as an auth
-// fault and is not one. When the tenant-policy source lands in auth-service, LEARTECH_AIGW_-
-// API_KEY becomes optional and pkg/auth's ServiceAuthClient is sufficient
-// on its own.
+// fault and is not one. When the tenant-policy source lands in
+// auth-service, LEARTECH_AIGW_API_KEY becomes optional and pkg/auth's
+// ServiceAuthClient is sufficient on its own.
 //
 // source: leartech-ai-gateway internal/api/handlers.go resolveLimits and
 // internal/authz/limits.go ResolveLimits.

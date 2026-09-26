@@ -1,4 +1,3 @@
-// Package gateway is the client for the ai-gateway admin API.
 package aigateway
 
 import (

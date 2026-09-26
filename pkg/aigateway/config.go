@@ -24,7 +24,7 @@ import (
 // rather than two conventions.
 const (
 	EnvURL    = "LEARTECH_AIGW_URL"
-	EnvAPIKey = "LEARTECH_AIGW_API_KEY"
+	EnvAPIKey = "LEARTECH_AIGW_API_KEY" //nolint:gosec // G101 false positive: env var name, not a credential
 	EnvModel  = "LEARTECH_AIGW_MODEL"
 
 	// EnvRunID is the correlation key, and is deliberately NOT prefixed
