@@ -200,7 +200,7 @@ func (e apiError) errorText() string {
 }
 
 // chatPath is the completions endpoint, named once so the streaming and
-// non-streaming paths cannot come to disagree about where they are posting.
+// non-streaming paths post to the same place. // proven-by: TestChatPaths_PostToTheSameEndpoint
 const chatPath = "/v1/chat/completions"
 
 // maxErrorBody bounds how much of a failing response is read back.
