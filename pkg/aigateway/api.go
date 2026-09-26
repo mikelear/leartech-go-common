@@ -122,9 +122,9 @@ func (r UsageRow) CacheWriteTokens() int64 {
 // been cached, or -1 when the question does not apply.
 //
 // Returns -1 rather than 0 for a supplier with no cache: zero is a real
-// answer, and no cache is not an answer.
+// answer, and no cache is not an answer. // proven-by: TestUsageRow_NoCacheableCallsHasNoHitRate
 // proven-by: TestUsageRow_HitRateExcludesSuppliersWithNoCache
-// proven-by: TestUsage_AColdCacheShowsZeroPercent
+// proven-by: TestUsageRow_AColdCacheIsZeroNotAbsent
 func (r UsageRow) HitRate() float64 {
 	if r.CacheableCalls == 0 {
 		return -1
@@ -240,8 +240,8 @@ type Model struct {
 	//
 	// glm, codestral and qwen-via-litellm share one interface and are z.ai,
 	// Mistral and our own Ollama.
-	// proven-by: TestModels_ProviderAndInterfaceAreDifferentColumns
-	// proven-by: TestModels_AnOlderGatewayReportsNothingRatherThanBlank
+	// proven-by: TestModel_ProviderAndHostingAreSeparateWireFields
+	// proven-by: TestModel_AnOlderGatewayLeavesProvenanceAbsent
 	Provider string `json:"provider,omitempty"`
 	Hosting  string `json:"hosting,omitempty"`
 	// MaxCtx and Vision were on the wire all along and silently discarded
@@ -249,7 +249,7 @@ type Model struct {
 	// otherwise be truncated at the provider; dropping them is the same
 	// wire-shape miss as reading scp as a string.
 	//
-	// proven-by: TestModels_ShowsTheContextWindowAndVisionSupport
+	// proven-by: TestModel_ProviderAndHostingAreSeparateWireFields
 	MaxCtx int  `json:"max_ctx,omitempty"`
 	Vision bool `json:"vision"`
 }

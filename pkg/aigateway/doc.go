@@ -46,10 +46,10 @@
 //
 // A virtual key is required today, and a bearer token is not a substitute.
 // The gateway resolves a spend cap from the credential, populates one only
-// for a virtual key, and refuses a caller it cannot resolve one for rather
-// than treating it as unlimited — so a JWT gets a caller authenticated and
-// then refused at the spend gate, which reads as an auth fault and is not
-// one. When the tenant-policy source lands in auth-service, LEARTECH_AIGW_-
+// for a virtual key, and refuses a caller whose cap it fails to resolve
+// rather than treating it as unlimited — so a JWT gets a caller
+// authenticated and then refused at the spend gate, which reads as an auth
+// fault and is not one. When the tenant-policy source lands in auth-service, LEARTECH_AIGW_-
 // API_KEY becomes optional and pkg/auth's ServiceAuthClient is sufficient
 // on its own.
 //

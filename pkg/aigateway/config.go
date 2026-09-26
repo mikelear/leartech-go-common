@@ -66,11 +66,11 @@ type Config struct {
 
 	// APIKey is a gateway virtual key. REQUIRED TODAY.
 	//
-	// A JWT alone cannot call a model: the gateway resolves a spend cap
-	// from the credential, populates it only for a virtual key, and refuses
-	// a caller it cannot resolve one for rather than treating it as
-	// unlimited. So a bearer token gets a caller authenticated and then
-	// refused at the spend gate.
+	// A JWT alone does not get a caller to a model. The gateway resolves a
+	// spend cap from the credential, populates it only for a virtual key,
+	// and refuses a caller whose cap it fails to resolve rather than
+	// treating it as unlimited — so a bearer token gets a caller
+	// authenticated and then refused at the spend gate.
 	//
 	// source: leartech-ai-gateway internal/api/handlers.go resolveLimits,
 	// which fills CredentialLimits only when keyid is non-empty, and
@@ -102,8 +102,9 @@ var ErrProviderEnv = errors.New("aigateway: provider-native environment is set")
 // the process's own, which is what makes the refusal below testable at all.
 //
 // FAILS CLOSED, matching pkg/auth: missing configuration is a construction
-// error and never a default. A gateway URL guessed from a constant is a
-// request sent somewhere nobody chose.
+// error rather than a default. // proven-by: TestLoadConfig_RefusesWithoutAURL
+// A gateway URL guessed from a constant is a request sent somewhere nobody
+// chose.
 //
 // proven-by: TestLoadConfig_ReadsTheEstateEnv
 // proven-by: TestLoadConfig_RefusesWithoutAURL
