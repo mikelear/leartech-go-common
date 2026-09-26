@@ -499,7 +499,7 @@ func (r ChatResponse) Reply() (string, bool) {
 // sk-lt- virtual key: /v1/chat/completions accepts either.
 func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	var r ChatResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/chat/completions", req, &r); err != nil {
+	if err := c.do(ctx, http.MethodPost, chatPath, req, &r); err != nil {
 		return ChatResponse{}, err
 	}
 	return r, nil

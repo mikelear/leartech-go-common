@@ -283,3 +283,107 @@ func TestCorrelate_StampsTheSessionHeader(t *testing.T) {
 		t.Errorf("%s = %q, want the correlation id", headerSessionID, got)
 	}
 }
+
+// ONE BUILDER, AND THE DIVERGENCE IT REMOVES.
+//
+// Chat went through do and ChatStream built its own request. They drifted
+// in ways neither call site could see, and the credential check is the one
+// that mattered: do refused an empty token before sending, ChatStream sent
+// "Authorization: Bearer " and let the gateway answer 401. The same
+// operator mistake surfaced as a local error on one path and a remote auth
+// failure on the other.
+func TestNewRequest_RefusesAnEmptyCredentialBeforeSending(t *testing.T) {
+	c := New("https://gw.example.com", "", nil)
+	if _, err := c.newRequest(context.Background(), http.MethodPost, chatPath, "application/json", nil); !errors.Is(err, ErrNoCredential) {
+		t.Errorf("err = %v, want ErrNoCredential", err)
+	}
+}
+
+func TestNewRequest_StampsAuthAcceptAndCorrelation(t *testing.T) {
+	c := New("https://gw.example.com", testToken, nil).
+		Correlate(func() (string, string) { return "run-1", CorrelateRun })
+
+	req, err := c.newRequest(context.Background(), http.MethodPost, chatPath, "text/event-stream", ChatRequest{Model: "glm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer "+testToken {
+		t.Errorf("Authorization = %q", got)
+	}
+	if got := req.Header.Get("Accept"); got != "text/event-stream" {
+		t.Errorf("Accept = %q, want the caller's choice", got)
+	}
+	// A body means a content type; no body means none.
+	if got := req.Header.Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q", got)
+	}
+	if got := req.Header.Get(headerRunID); got != "run-1" {
+		t.Errorf("%s = %q, want run-1", headerRunID, got)
+	}
+	if req.URL.String() != "https://gw.example.com"+chatPath {
+		t.Errorf("URL = %q", req.URL.String())
+	}
+}
+
+// THE BEHAVIOUR THAT CHANGED. ChatStream used to reach the network with an
+// empty bearer token; it now refuses locally, the same as Chat.
+//
+// Asserted by the server NEVER BEING REACHED, not by the error alone: an
+// error could equally come back from a 401, which is exactly the outcome
+// this replaces.
+func TestChatStream_RefusesAnEmptyCredentialBeforeSending(t *testing.T) {
+	reached := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, "", srv.Client())
+	_, err := c.ChatStream(context.Background(), ChatRequest{Model: "glm"})
+	if !errors.Is(err, ErrNoCredential) {
+		t.Errorf("err = %v, want ErrNoCredential", err)
+	}
+	if reached {
+		t.Error("the request was sent with an empty credential")
+	}
+}
+
+// Both paths post to the SAME endpoint, named once. Two call sites that
+// spell an endpoint separately are two call sites that can come to
+// disagree about it.
+func TestChatPaths_PostToTheSameEndpoint(t *testing.T) {
+	var streamed, plain string
+
+	srvStream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		streamed = r.URL.Path
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	t.Cleanup(srvStream.Close)
+	ch, err := New(srvStream.URL, testToken, srvStream.Client()).
+		ChatStream(context.Background(), ChatRequest{Model: "glm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+
+	srvPlain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		plain = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	t.Cleanup(srvPlain.Close)
+	if _, err := New(srvPlain.URL, testToken, srvPlain.Client()).
+		Chat(context.Background(), ChatRequest{Model: "glm"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if streamed != plain {
+		t.Errorf("stream posted to %q, chat to %q — the two paths disagree", streamed, plain)
+	}
+	if streamed != chatPath {
+		t.Errorf("posted to %q, want %q", streamed, chatPath)
+	}
+}
