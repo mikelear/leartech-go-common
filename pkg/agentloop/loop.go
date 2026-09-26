@@ -1,7 +1,3 @@
-// A PURE STATE MACHINE. Events go in, Actions come out, and nothing in
-// this file touches a terminal, a network or a clock — which is what makes
-// the loop driveable from a shell script, a requirement set before a line
-// was written rather than discovered afterwards.
 package agentloop
 
 import (
@@ -162,6 +158,11 @@ func (s State) String() string {
 }
 
 // Loop is the conversation and where it has got to.
+//
+// A PURE STATE MACHINE. Events go in, Actions come out, and nothing in
+// this file touches a terminal, a network or a clock — which is what makes
+// the loop driveable from a script, a requirement set before a line was
+// written rather than discovered afterwards.
 type Loop struct {
 	state    State
 	messages []Message
