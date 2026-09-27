@@ -131,13 +131,26 @@ func LoadConfig(env func(string) string) (Config, error) {
 		SessionID: get(EnvSessionID),
 	}
 
+	// WRAPPED IN ErrNoCredential, WHICH IS WHAT AN INCOMPLETE ENVIRONMENT
+	// MEANS: "there is no token to present". These returned a bare
+	// fmt.Errorf, so a caller matching on the sentinel could not tell a
+	// missing credential from any other failure — and ship-proven's report()
+	// maps ErrNoCredential to its own exit code precisely so that a Job whose
+	// Secret failed to project is distinguishable from a Job whose work
+	// failed. Without the wrap both exit 1, the controller sees one signal
+	// for two remedies, and a projection bug reads as a bad brief.
+	//
+	// proven-by: TestLoadConfig_AMissingURLIsNoCredential
+	// proven-by: TestLoadConfig_AMissingKeyIsNoCredential
+	// proven-by: TestLoadConfig_ABadCorrelationIsNotACredentialProblem
 	if c.URL == "" {
-		return Config{}, fmt.Errorf("aigateway: %s is not set", EnvURL)
+		return Config{}, fmt.Errorf("%w: %s is not set", ErrNoCredential, EnvURL)
 	}
 	if c.APIKey == "" {
-		return Config{}, fmt.Errorf("aigateway: %s is not set. A bearer token "+
+		return Config{}, fmt.Errorf("%w: %s is not set. A bearer token "+
 			"is not sufficient: the gateway refuses a caller it cannot resolve "+
-			"a spend cap for, and it resolves one only from a virtual key", EnvAPIKey)
+			"a spend cap for, and it resolves one only from a virtual key",
+			ErrNoCredential, EnvAPIKey)
 	}
 	if c.RunID != "" && c.SessionID != "" {
 		return Config{}, fmt.Errorf("aigateway: both %s and %s are set. "+

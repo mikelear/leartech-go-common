@@ -238,3 +238,91 @@ func TestFromEnv_PropagatesAConfigError(t *testing.T) {
 		t.Fatal("FromEnv returned no error with no API key")
 	}
 }
+
+// AN INCOMPLETE ENVIRONMENT IS A CREDENTIAL PROBLEM, and has to be
+// recognisable as one.
+//
+// These returned a bare fmt.Errorf, so every caller matching on the sentinel
+// fell through to its generic failure path. ship-proven's report() maps
+// ErrNoCredential to a distinct exit code exactly so an agent Job whose
+// Secret failed to project is distinguishable from one whose work failed;
+// without the wrap both exited 1, and the controller saw one signal for two
+// different remedies.
+func TestLoadConfig_AMissingURLIsNoCredential(t *testing.T) {
+	_, err := LoadConfig(func(k string) string {
+		if k == EnvAPIKey {
+			return "sk-lt-key"
+		}
+		return ""
+	})
+	if !errors.Is(err, ErrNoCredential) {
+		t.Fatalf("err = %v, want it to wrap ErrNoCredential", err)
+	}
+	if !strings.Contains(err.Error(), EnvURL) {
+		t.Errorf("err = %v, want the missing variable named", err)
+	}
+}
+
+func TestLoadConfig_AMissingKeyIsNoCredential(t *testing.T) {
+	_, err := LoadConfig(func(k string) string {
+		if k == EnvURL {
+			return "http://gw"
+		}
+		return ""
+	})
+	if !errors.Is(err, ErrNoCredential) {
+		t.Fatalf("err = %v, want it to wrap ErrNoCredential", err)
+	}
+	if !strings.Contains(err.Error(), EnvAPIKey) {
+		t.Errorf("err = %v, want the missing variable named", err)
+	}
+}
+
+// AND NOT EVERY CONFIG ERROR IS A CREDENTIAL ONE. Sending both a run id and
+// a session id is a caller mistake with a credential present, and reporting
+// it as "no credential" would send an operator looking at the wrong Secret.
+func TestLoadConfig_ABadCorrelationIsNotACredentialProblem(t *testing.T) {
+	_, err := LoadConfig(func(k string) string {
+		switch k {
+		case EnvURL:
+			return "http://gw"
+		case EnvAPIKey:
+			return "sk-lt-key"
+		case EnvRunID:
+			return "r1"
+		case EnvSessionID:
+			return "s1"
+		}
+		return ""
+	})
+	if err == nil {
+		t.Fatal("both correlation keys set must be refused")
+	}
+	if errors.Is(err, ErrNoCredential) {
+		t.Error("a correlation mistake reported as a missing credential sends an " +
+			"operator to the wrong Secret")
+	}
+}
+
+// A provider-native environment stays its own finding too, for the same
+// reason: the remedy is to remove a variable, not to provision a key.
+func TestLoadConfig_ProviderEnvIsNotACredentialProblem(t *testing.T) {
+	_, err := LoadConfig(func(k string) string {
+		switch k {
+		case EnvURL:
+			return "http://gw"
+		case EnvAPIKey:
+			return "sk-lt-key"
+		case "ANTHROPIC_API_KEY":
+			return "sk-ant-x"
+		}
+		return ""
+	})
+	if !errors.Is(err, ErrProviderEnv) {
+		t.Fatalf("err = %v, want ErrProviderEnv", err)
+	}
+	if errors.Is(err, ErrNoCredential) {
+		t.Error("a provider-native environment reported as a missing credential " +
+			"points at provisioning rather than at the variable to remove")
+	}
+}
