@@ -1,6 +1,7 @@
 package agentloop
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -199,15 +200,23 @@ func ReadFile(root string) Tool {
 		Name:   "local__read_file",
 		Effect: Reads,
 		Description: "Read a UTF-8 text file from the working directory. " +
-			"Paths are relative to it and cannot escape it.",
+			"Paths are relative to it and cannot escape it. Give offset " +
+			"and limit to read a range of lines instead of the whole file; " +
+			"a range is the only way to read a file over the size cap.",
 		Schema: json.RawMessage(`{
 		  "type":"object",
-		  "properties":{"path":{"type":"string","description":"path relative to the working directory"}},
+		  "properties":{
+		    "path":{"type":"string","description":"path relative to the working directory"},
+		    "offset":{"type":"integer","description":"first line to return, 1-based; omit for the start of the file"},
+		    "limit":{"type":"integer","description":"how many lines to return; omit for the rest of the file"}
+		  },
 		  "required":["path"]
 		}`),
 		Run: func(args json.RawMessage) (string, error) {
 			var in struct {
-				Path string `json:"path"`
+				Path   string `json:"path"`
+				Offset int    `json:"offset"`
+				Limit  int    `json:"limit"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return "", fmt.Errorf("arguments are not valid JSON: %w", err)
@@ -215,9 +224,95 @@ func ReadFile(root string) Tool {
 			if in.Path == "" {
 				return "", errors.New("path is required")
 			}
-			return readUnder(root, in.Path)
+			if in.Offset == 0 && in.Limit == 0 {
+				return readUnder(root, in.Path)
+			}
+			return readRangeUnder(root, in.Path, in.Offset, in.Limit)
 		},
 	}
+}
+
+// readRangeUnder returns a line range, 1-based and inclusive of offset.
+//
+// WHY A RANGE EXISTS AT ALL. Without one a model that wants forty lines of a
+// nine-hundred-line file has two options: read the whole thing and pay for it
+// in the next prompt, or shell out to sed. Measured on agent run
+// shipproven-all-passed-means-all (2026-09-28), nine of twenty-six bash calls
+// were `sed -n X,Yp` against files this tool could already open — a tool was
+// being routed around rather than used.
+//
+// AND IT IS THE ONLY WAY TO READ A LARGE FILE. [readUnder] refuses anything
+// over the cap outright. // proven-by: TestReadFile_ARangeReadsBeyondTheWholeFileCap
+// A range is bounded by what it returns rather than by the size of the file
+// it came from, so the cap that protects the prompt stops also being a wall.
+//
+// THE HEADER IS NOT DECORATION. A bare slice of lines looks exactly like a
+// whole file, and a model that believes it has read everything will conclude
+// things about what is absent. The range and the file's true length are
+// stated. // proven-by: TestReadFile_ARangeSaysWhatItIs
+//
+// proven-by: TestReadFile_ReadsALineRange
+// proven-by: TestReadFile_ARangeReadsBeyondTheWholeFileCap
+// proven-by: TestReadFile_AnOffsetPastTheEndSaysSo
+// proven-by: TestReadFile_ALimitBeyondTheEndStopsAtTheEnd
+func readRangeUnder(root, rel string, offset, limit int) (string, error) {
+	_, resolved, err := resolveUnder(root, rel)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s is a directory", rel)
+	}
+	if offset < 0 || limit < 0 {
+		return "", fmt.Errorf("offset and limit count lines and cannot be negative (got offset=%d limit=%d)", offset, limit)
+	}
+	if offset == 0 {
+		offset = 1
+	}
+
+	f, err := os.Open(resolved) // #nosec G304 -- resolved and proven under root above
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+
+	const maxRangeBytes = 256 * 1024
+	sc := bufio.NewScanner(f)
+	// A generated or minified file can hold one line longer than the
+	// scanner's default 64KB, and the default is a silent truncation.
+	sc.Buffer(make([]byte, 0, 64*1024), maxRangeBytes)
+
+	var b strings.Builder
+	line, taken := 0, 0
+	for sc.Scan() {
+		line++
+		if line < offset {
+			continue
+		}
+		if limit > 0 && taken == limit {
+			// Keep counting so the header can state the file's real length.
+			continue
+		}
+		if b.Len() > maxRangeBytes {
+			return "", fmt.Errorf("lines %d-%d of %s exceed %d bytes; ask for fewer",
+				offset, line, rel, maxRangeBytes)
+		}
+		b.WriteString(sc.Text())
+		b.WriteByte('\n')
+		taken++
+	}
+	if err := sc.Err(); err != nil {
+		return "", fmt.Errorf("reading %s: %w", rel, err)
+	}
+	if offset > line {
+		return "", fmt.Errorf("%s has %d lines; offset %d is past the end", rel, line, offset)
+	}
+	return fmt.Sprintf("// %s lines %d-%d of %d\n%s",
+		rel, offset, offset+taken-1, line, b.String()), nil
 }
 
 // resolveUnder resolves a path and refuses anything outside root.
