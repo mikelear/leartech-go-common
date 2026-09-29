@@ -428,17 +428,16 @@ func toWire(msgs []Message) []aigateway.ChatRequestMessage {
 // lastMarkable is the index of the final message whose text can carry the
 // breakpoint, or -1 when none can.
 //
-// A MESSAGE WITH NO TEXT CANNOT HOLD ONE. An assistant turn that only
-// called a tool has empty Content, and a block with an empty string is not
-// a prefix — marking it would spend the breakpoint on nothing and cache
-// less than the turn before, so the search walks back to real text.
-// A message with no text is skipped even when it is the newest: the system
-// message before it carries the breakpoint instead.
+// A MESSAGE WITH NO TEXT IS NOT A PREFIX. An assistant turn that only
+// called a tool has empty Content, and a block with an empty string spends
+// the breakpoint on nothing and caches less than the turn before, so the
+// search walks back to real text — even when that text is the system
+// message two places earlier.
 //
 // proven-by: TestToWire_SkipsAMessageWithNoTextToMark
 // proven-by: TestToWire_AMessageWithNoTextIsSkippedAndTheSystemMessageIsMarkable
 //
-// A TOOL RESULT CANNOT HOLD ONE EITHER. Marking it makes toWire emit the
+// A TOOL RESULT IS NOT ONE EITHER. Marking it makes toWire emit the
 // result as content blocks instead of a string, and the claude adapter
 // drops a tool result that is not a plain string — the cache hint became a
 // dropped message. Skipping role "tool" puts the breakpoint one message
