@@ -432,8 +432,11 @@ func toWire(msgs []Message) []aigateway.ChatRequestMessage {
 // called a tool has empty Content, and a block with an empty string is not
 // a prefix — marking it would spend the breakpoint on nothing and cache
 // less than the turn before, so the search walks back to real text.
+// A message with no text is skipped even when it is the newest: the system
+// message before it carries the breakpoint instead.
 //
 // proven-by: TestToWire_SkipsAMessageWithNoTextToMark
+// proven-by: TestToWire_AMessageWithNoTextIsSkippedAndTheSystemMessageIsMarkable
 //
 // A TOOL RESULT CANNOT HOLD ONE EITHER. Marking it makes toWire emit the
 // result as content blocks instead of a string, and the claude adapter
@@ -449,7 +452,6 @@ func toWire(msgs []Message) []aigateway.ChatRequestMessage {
 // proven-by: TestLastMarkable_SkipsToolResults
 // proven-by: TestToWire_PlainUserTurnContentStaysAString
 // proven-by: TestToWire_MarksNothingWhenOnlyToolResultsHaveContent
-// proven-by: TestLastMarkable_AMessageWithNoTextIsSkipped
 func lastMarkable(msgs []Message) int {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Content == "" || msgs[i].Role == "tool" {
