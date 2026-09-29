@@ -398,6 +398,7 @@ func (r *Runner) definitions() json.RawMessage {
 // proven-by: TestToWire_MarksTheTailEvenWhenItIsShort
 // proven-by: TestToWire_MarksExactlyOneMessage
 // proven-by: TestToWire_SkipsAMessageWithNoTextToMark
+// proven-by: TestToWire_MarksNothingWhenOnlyToolResultsHaveContent
 // proven-by: TestToWire_MarksNothingWhenThereIsNothingToSend
 func toWire(msgs []Message) []aigateway.ChatRequestMessage {
 	mark := lastMarkable(msgs)
@@ -427,18 +428,35 @@ func toWire(msgs []Message) []aigateway.ChatRequestMessage {
 // lastMarkable is the index of the final message whose text can carry the
 // breakpoint, or -1 when none can.
 //
-// A MESSAGE WITH NO TEXT CANNOT HOLD ONE. // proven-by: TestToWire_SkipsAMessageWithNoTextToMark
-// An assistant turn that only
-// called a tool has empty Content, and a block with an empty string is not
-// a prefix — marking it would spend the breakpoint on nothing and cache
-// less than the turn before, so the search walks back to real text.
+// A MESSAGE WITH NO TEXT IS NOT A PREFIX. An assistant turn that only
+// called a tool has empty Content, and a block with an empty string spends
+// the breakpoint on nothing and caches less than the turn before, so the
+// search walks back to real text — even when that text is the system
+// message two places earlier.
 //
 // proven-by: TestToWire_SkipsAMessageWithNoTextToMark
+// proven-by: TestToWire_AMessageWithNoTextIsSkippedAndTheSystemMessageIsMarkable
+//
+// A TOOL RESULT IS NOT ONE EITHER. Marking it makes toWire emit the
+// result as content blocks instead of a string, and the claude adapter
+// drops a tool result that is not a plain string — the cache hint became a
+// dropped message. Skipping role "tool" puts the breakpoint one message
+// earlier, on the newest user or system text; the history before that
+// point is still the prefix the next turn reads from cache, so nothing is
+// lost but the adapter's worst case.
+//
+// #37; the same behaviour client-side in mikelear/leartech-ba-service#130;
+// the adapter side of the drop in mikelear/leartech-ai-gateway#114.
+//
+// proven-by: TestLastMarkable_SkipsToolResults
+// proven-by: TestToWire_PlainUserTurnContentStaysAString
+// proven-by: TestToWire_MarksNothingWhenOnlyToolResultsHaveContent
 func lastMarkable(msgs []Message) int {
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Content != "" {
-			return i
+		if msgs[i].Content == "" || msgs[i].Role == "tool" {
+			continue
 		}
+		return i
 	}
 	return -1
 }

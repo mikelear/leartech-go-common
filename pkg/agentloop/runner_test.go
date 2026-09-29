@@ -759,17 +759,25 @@ func TestToWire_MarksTheEndOfTheConversation(t *testing.T) {
 	if len(got) != 4 {
 		t.Fatalf("got %d messages", len(got))
 	}
-	last := got[3]
-	if len(last.Blocks) != 1 || last.Blocks[0].CacheControl == nil {
-		t.Fatalf("the end of the conversation is not marked cacheable: %+v", last)
+	// THE BREAKPOINT GOES ON THE LAST MESSAGE THAT IS NOT A TOOL RESULT.
+	// The loop always ends a tool turn on a tool result, so on this shape
+	// the tail is the assistant text before it — the marker must land there
+	// or the claude adapter drops the result outright.
+	if len(got[2].Blocks) != 1 || got[2].Blocks[0].CacheControl == nil {
+		t.Fatalf("the newest non-tool text is not marked cacheable: %+v", got[2])
 	}
-	if last.Blocks[0].Text != "file contents" {
-		t.Errorf("the block does not carry the message text: %q", last.Blocks[0].Text)
+	if got[2].Blocks[0].Text != "hi" {
+		t.Errorf("the block does not carry the message text: %q", got[2].Blocks[0].Text)
 	}
 	// Blocks and Content are alternatives. Leaving both set sends the text
 	// twice — paying double for the thing being cached.
-	if last.Content != "" {
+	if got[2].Content != "" {
 		t.Error("Content was left set alongside Blocks, so the text is sent twice")
+	}
+	// The tool result itself must stay a plain string, because that is the
+	// one shape the adapter does not drop.
+	if got[3].Blocks != nil || got[3].Content != "file contents" {
+		t.Errorf("the tool result was not sent as plain content: %+v", got[3])
 	}
 	// The system message must NOT be separately marked: it is inside the
 	// cached prefix already, and a second breakpoint spends one of four.
@@ -786,6 +794,41 @@ func TestToWire_MarksTheTailEvenWhenItIsShort(t *testing.T) {
 	got := toWire([]Message{{Role: "user", Content: "hi"}})
 	if len(got[0].Blocks) != 1 || got[0].Blocks[0].CacheControl == nil {
 		t.Errorf("a short tail was left unmarked, reintroducing the size gate: %+v", got[0])
+	}
+}
+
+// THE OTHER HALF OF A PLAIN TURN: nothing about it changes. The loop's own
+// history ends in a user message only on the first turn, and that turn is
+// also the cheapest one to break — if the tool-role fix reached back and
+// unmarked it, every first turn would pay full input price again.
+func TestToWire_PlainUserTurnContentStaysAString(t *testing.T) {
+	msgs := []Message{
+		{Role: "system", Content: "be brief"},
+		{Role: "user", Content: "read it"},
+	}
+	got := toWire(msgs)
+	if len(got) != 2 {
+		t.Fatalf("got %d messages", len(got))
+	}
+	// UNCHANGED: the fix must not reach back into a turn that has no tool
+	// results at all. Before it, this history marked message 1 — the last
+	// message — and it still does.
+	if mark := lastMarkable(msgs); mark != len(msgs)-1 {
+		t.Errorf("lastMarkable = %d, want %d — a plain user turn must keep its breakpoint on the tail",
+			mark, len(msgs)-1)
+	}
+	if len(got[1].Blocks) != 1 || got[1].Blocks[0].CacheControl == nil {
+		t.Errorf("the last message of a plain turn lost the breakpoint: %+v", got[1])
+	}
+	if got[1].Blocks[0].Text != "read it" {
+		t.Errorf("the block does not carry the message text: %q", got[1].Blocks[0].Text)
+	}
+	// The only string that had to become a block is the marked one. An
+	// UNMARKED message keeps plain string content — it is the tool result
+	// that must never be converted, and this is the same rule holding on
+	// the plain-turn side of the fix.
+	if got[0].Content != "be brief" || got[0].Blocks != nil {
+		t.Errorf("an unmarked message must keep plain string content: %+v", got[0])
 	}
 }
 
@@ -846,6 +889,74 @@ func TestToWire_MarksNothingWhenThereIsNothingToSend(t *testing.T) {
 	}
 	if len(got[0].Blocks) != 0 {
 		t.Errorf("marked a message with no text when no other was available: %+v", got[0])
+	}
+}
+
+// NOTHING LEFT TO MARK. Once tool results are unmarkable, a history whose
+// only text is tool results has no breakpoint at all — the correct answer is
+// -1, not "mark the tool result anyway because it is all there is": that is
+// exactly the message the adapter drops, so marking it buys the cache at the
+// cost of the content. In practice the loop cannot build this shape (a tool
+// result is always preceded by the user turn that asked for it), so this is
+// the guard against a future caller's history, not against the loop's.
+func TestToWire_MarksNothingWhenOnlyToolResultsHaveContent(t *testing.T) {
+	msgs := []Message{
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "t1", Name: "x"}}},
+		{Role: "tool", ToolCallID: "t1", Content: "only text in the history"},
+	}
+	if got := lastMarkable(msgs); got != -1 {
+		t.Errorf("lastMarkable = %d, want -1 — a tool result cannot hold the breakpoint", got)
+	}
+	wire := toWire(msgs)
+	for i, m := range wire {
+		if len(m.Blocks) != 0 {
+			t.Errorf("message %d was marked: %+v", i, m)
+		}
+		if m.Content != msgs[i].Content {
+			t.Errorf("message %d content = %q, want %q", i, m.Content, msgs[i].Content)
+		}
+	}
+}
+
+// THE PREDICATE ITSELF, WITHOUT THE ROUND TRIP. Four messages, and the
+// answer is the index of the newest message that is neither empty nor a
+// tool result.
+func TestLastMarkable_SkipsToolResults(t *testing.T) {
+	msgs := []Message{
+		{Role: "system", Content: "be brief"},
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi"},
+		{Role: "tool", ToolCallID: "t1", Content: "file contents"},
+	}
+	if got := lastMarkable(msgs); got != 2 {
+		t.Errorf("lastMarkable = %d, want 2 — the tool result must be skipped, not marked", got)
+	}
+	// The skip is not "prefer a user message": it is "skip a tool result",
+	// so a later assistant text still wins when it is the newest.
+	if got := lastMarkable(msgs[:3]); got != 2 {
+		t.Errorf("lastMarkable = %d, want 2 — the marker did not follow the newest non-tool text", got)
+	}
+}
+
+// A SYSTEM MESSAGE IS MARKABLE. It is text like any other, it is the one
+// message present on every turn, and a history that ends with nothing but
+// the system message has nowhere else to spend the breakpoint.
+func TestToWire_AMessageWithNoTextIsSkippedAndTheSystemMessageIsMarkable(t *testing.T) {
+	got := toWire([]Message{
+		{Role: "system", Content: "be brief"},
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "t1", Name: "x"}}},
+	})
+	if len(got) != 2 {
+		t.Fatalf("got %d messages", len(got))
+	}
+	if len(got[1].Blocks) != 0 {
+		t.Errorf("a message with no text was marked: %+v", got[1])
+	}
+	if len(got[0].Blocks) != 1 || got[0].Blocks[0].CacheControl == nil {
+		t.Errorf("the system message cannot carry the breakpoint: %+v", got[0])
+	}
+	if got[1].ToolCalls == nil {
+		t.Error("the tool call was lost")
 	}
 }
 
@@ -954,6 +1065,11 @@ func TestRunner_UsageWithNobodyWatchingIsFine(t *testing.T) {
 // THE BREAKPOINT MOVES WITH THE CONVERSATION. A second turn must mark its
 // own tail, not the one the first turn marked — otherwise the prefix stops
 // growing and every later turn re-bills the accumulated tool results.
+//
+// THE TAIL IS THE NEWEST MESSAGE THAT IS NOT A TOOL RESULT. Turn 2 ends on
+// a tool result (the loop always does after a call), and marking that is
+// what the claude adapter drops (#37), so the breakpoint lands on the user
+// turn before it — still the newest text, one message back.
 func TestRunner_EachTurnMarksItsOwnTail(t *testing.T) {
 	reg := NewRegistry()
 	if err := reg.Add(ListDir(t.TempDir())); err != nil {
@@ -983,9 +1099,20 @@ func TestRunner_EachTurnMarksItsOwnTail(t *testing.T) {
 		if marked == -1 {
 			t.Fatalf("turn %d marked no breakpoint", n+1)
 		}
-		if want := len(req.Messages) - 1; marked != want {
-			t.Errorf("turn %d marked message %d of %d; the breakpoint did not move to the tail",
-				n+1, marked, len(req.Messages))
+		// The tail is the NEWEST NON-TOOL MESSAGE WITH TEXT, not the last
+		// message — the end of turn 2 is a tool result, and marking that is
+		// what the adapter drops. So: the marked message is not a tool
+		// result, and nothing after it is markable either.
+		if role := req.Messages[marked].Role; role == "tool" {
+			t.Errorf("turn %d marked a %q message — a tool result cannot carry the breakpoint",
+				n+1, role)
+		}
+		for i := marked + 1; i < len(req.Messages); i++ {
+			m := req.Messages[i]
+			if m.Role != "tool" && m.Content != "" {
+				t.Errorf("turn %d marked message %d but message %d (%q) is newer non-tool text",
+					n+1, marked, i, m.Role)
+			}
 		}
 	}
 	// The second turn must be strictly longer, or there is no growing
