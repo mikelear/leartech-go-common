@@ -251,6 +251,42 @@ type Model struct {
 	// proven-by: TestModel_ProviderAndHostingAreSeparateWireFields
 	MaxCtx int  `json:"max_ctx,omitempty"`
 	Vision bool `json:"vision"`
+	// Surfaces is what the gateway serves the model AS: "chat",
+	// "embeddings", and future values (rerank, moderation, batch). The
+	// gateway's catalogue grew this per-row in ai-gateway#124 — one
+	// interface (fireworks) fronts chat models and qwen-embedding alike,
+	// so the adapter's Embedder seam says an interface CAN embed while
+	// surfaces says a model is SERVED as what.
+	//
+	// Absent means an older gateway that predates the field: read it as
+	// CHAT-ONLY, never as "serves nothing" — every row that predates
+	// surfaces was catalogued for chat, and a client that dropped unreported
+	// rows would de-scope an estate mid-rollout. Serves() encodes that rule.
+	//
+	// proven-by: TestModel_SurfacesIsASeparateWireField
+	// proven-by: TestModel_AnOlderGatewayLeavesSurfacesAbsent
+	Surfaces []string `json:"surfaces,omitempty"`
+}
+
+// ServesSurface reports whether the model is served on the named surface.
+//
+// UNREPORTED IS CHAT: a Model with no Surfaces came from a gateway older
+// than ai-gateway#124, and every row that gateway could advertise was a chat
+// row. Returning false for chat there would make a mid-rollout client refuse
+// every model on a not-yet-upgraded gateway.
+//
+// proven-by: TestModel_Serves_AnUnreportedModelStillServesChat
+// proven-by: TestModel_Serves_AnEmbeddingsOnlyModelIsNotChat
+func (m Model) ServesSurface(surface string) bool {
+	if len(m.Surfaces) == 0 {
+		return surface == "chat"
+	}
+	for _, s := range m.Surfaces {
+		if s == surface {
+			return true
+		}
+	}
+	return false
 }
 
 // Served is what a Model's concrete name is known to be.
