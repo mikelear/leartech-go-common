@@ -147,3 +147,61 @@ func TestVerdict_TooOldIsUnreachableAtTheCurrentMinimum(t *testing.T) {
 		t.Errorf("the only level below the minimum is 0, which means absent")
 	}
 }
+
+// Surfaces is what the model is SERVED AS, per-row, separate from the
+// interface: qwen-embedding is embeddings-only behind the same fireworks
+// interface that serves chat models, and a chat client filtering the
+// catalogue needs this field to exclude it.
+func TestModel_SurfacesIsASeparateWireField(t *testing.T) {
+	var m Model
+	if err := json.Unmarshal([]byte(`{
+		"id":"qwen-embedding","interface":"fireworks",
+		"surfaces":["embeddings"],"max_ctx":40959
+	}`), &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Surfaces) != 1 || m.Surfaces[0] != "embeddings" {
+		t.Errorf("Surfaces = %v, want [embeddings]", m.Surfaces)
+	}
+}
+
+// AN OLDER GATEWAY REPORTS NOTHING RATHER THAN A BLANK. A gateway older than
+// ai-gateway#124 omits the field entirely; that must read as "unreported",
+// not "serves nothing".
+func TestModel_AnOlderGatewayLeavesSurfacesAbsent(t *testing.T) {
+	var m Model
+	if err := json.Unmarshal([]byte(`{"id":"claude","vision":false}`), &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Surfaces != nil {
+		t.Errorf("Surfaces = %v, want nil — the older gateway said nothing", m.Surfaces)
+	}
+	// And "said nothing" still means chat, below.
+}
+
+// UNREPORTED IS CHAT: every row a pre-surfaces gateway could advertise was a
+// chat row, so a client that treated absence as "not chat" would refuse every
+// model on a not-yet-upgraded gateway — a de-scope shipped as a rollout.
+func TestModel_Serves_AnUnreportedModelStillServesChat(t *testing.T) {
+	m := Model{ID: "claude"} // no Surfaces
+	if !m.ServesSurface("chat") {
+		t.Error("ServesSurface(\"chat\") = false for an unreported model — this is the " +
+			"mid-rollout refusal the absent-is-chat rule exists to prevent")
+	}
+	if m.ServesSurface("embeddings") {
+		t.Error("absence must not grant a second surface")
+	}
+}
+
+// The row that started this: embeddings-only is not chat-callable, and the
+// client-side membership test must agree with the gateway's.
+func TestModel_Serves_AnEmbeddingsOnlyModelIsNotChat(t *testing.T) {
+	m := Model{ID: "qwen-embedding", Surfaces: []string{"embeddings"}}
+	if m.ServesSurface("chat") {
+		t.Error("ServesSurface(\"chat\") = true — chat to qwen-embedding answers garbage " +
+			"or an upstream 400 (ai-gateway#118)")
+	}
+	if !m.ServesSurface("embeddings") {
+		t.Error("ServesSurface(\"embeddings\") = false for its own surface")
+	}
+}

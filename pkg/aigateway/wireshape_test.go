@@ -101,7 +101,7 @@ func TestWireShape_EveryEndpointDecodesWhatTheGatewaySends(t *testing.T) {
 			body: `{"object":"list","data":[{"id":"claude","object":"model",
 			  "owned_by":"leartech","interface":"anthropic",
 			  "provider":"anthropic","hosting":"vendor-api",
-			  "provider_model":"claude-opus-4-8","max_ctx":200000,"vision":true}]}`,
+			  "provider_model":"claude-opus-4-8","max_ctx":200000,"vision":true,"surfaces":["chat","embeddings"]}]}`,
 			call: func(c *Client) (any, []any, error) {
 				ms, err := c.Models(context.Background())
 				if err != nil || len(ms) == 0 {
