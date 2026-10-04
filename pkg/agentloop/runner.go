@@ -74,6 +74,28 @@ type Runner struct {
 	// proven-by: TestRunner_ReportsWhatTheTurnCost
 	// proven-by: TestRunner_ASupplierThatReportsNoUsageIsNotAnError
 	OnUsage func(aigateway.ChatUsage)
+
+	// OnBoundary is told at every turn boundary, with the checkpoint that
+	// exists there, already marshalled.
+	//
+	// NIL IS FINE and means nobody is checkpointing: the ordinary run pays
+	// nothing, which is how a test rig stays a rig.
+	//
+	// The checkpoint arrives as BYTES, already marshalled, because the
+	// consumer's job is to write a file and the runner should not know whether
+	// that file is local, a session registry, or nothing. An error from the
+	// callback FAILS THE RUN — a checkpoint chain with a hole in it resumes
+	// somewhere the operator was not told about, and a silent skip would make
+	// the next successful write look like the whole history.
+	//
+	// proven-by: TestRun_WritesABoundaryCheckpoint
+	// proven-by: TestRun_ACheckpointWriteFailureFailsTheRun
+	OnBoundary func(b []byte) error
+
+	// resumed is the checkpoint a RunRestored call was seeded from, and
+	// nil on the ordinary path. Unexported: the only writer is RunRestored,
+	// which is the whole reason it exists as a second entry point.
+	resumed *Checkpoint
 }
 
 // Run reads one input line at a time until the reader ends.
@@ -95,6 +117,66 @@ type Runner struct {
 // proven-by: TestRunner_AnErroredTurnStillRunsTheRestOfTheScript
 func (r *Runner) Run(ctx context.Context, in Lines, system string, maxTools int) error {
 	loop := New(system, maxTools)
+	return r.runWithLoop(ctx, loop, in, maxTools)
+}
+
+// RunRestored drives a loop seeded from a checkpoint: the resumed
+// conversation is history, not a message to re-send.
+//
+// WHY A SECOND ENTRY POINT RATHER THAN A LOOP FIELD. Runner creates its
+// loop once in Run and drives everything through Step; a field the caller
+// sets would be a second way for state to arrive and one nobody exercises
+// on the ordinary path. This constructor takes the RESTORED loop the way
+// Run takes a system prompt, and both paths share everything below.
+//
+// The caller supplies the checkpoint it restored so the FIRST boundary the
+// resumed session crosses chains onto the file it resumed; the loop cannot
+// know that hash, New does not take one.
+//
+// proven-by: TestRunRestored_ContinuesTheConversationFromTheCheckpoint
+// proven-by: TestRunRestored_ChainsOntoTheCheckpointItResumed
+func (r *Runner) RunRestored(ctx context.Context, restored *Loop, from *Checkpoint,
+	in Lines, maxTools int) error {
+	if restored == nil {
+		return fmt.Errorf("RunRestored: no loop to run")
+	}
+	r.resumed = from
+	return r.runWithLoop(ctx, restored, in, maxTools)
+}
+
+func (r *Runner) runWithLoop(ctx context.Context, loop *Loop, in Lines, maxTools int) error {
+	var turn int
+	var prevHash string
+	if r.resumed != nil {
+		// The resumed conversation keeps its place in the chain: turns
+		// continue counting up and the first new checkpoint extends the
+		// file this run was seeded from.
+		// proven-by: TestRunRestored_ChainsOntoTheCheckpointItResumed
+		turn = r.resumed.Turn
+		prevHash = r.resumed.Hash
+	}
+	boundary := func() error {
+		if r.OnBoundary == nil {
+			return nil
+		}
+		cp, err := loop.Checkpoint(turn, prevHash)
+		if err != nil {
+			// The runner calls here only from Idle, so a refusal is a
+			// bug in this package — but it says so rather than writing a
+			// checkpoint of a half-finished turn.
+			return err
+		}
+		b, err := json.Marshal(cp)
+		if err != nil {
+			return err
+		}
+		if err := r.OnBoundary(b); err != nil {
+			return err
+		}
+		prevHash = cp.Hash
+		return nil
+	}
+
 	if r.UI == nil {
 		r.UI = Quiet{}
 	}
@@ -131,6 +213,19 @@ func (r *Runner) Run(ctx context.Context, in Lines, system string, maxTools int)
 			}
 		}
 		shown, dErr := r.drive(ctx, loop, Event{Kind: UserInput, Text: line})
+		// THE BOUNDARY CHECKPOINT, written after the input's actions have
+		// played out and the loop is idle again. Not before the model call
+		// (there is nothing new to save) and not mid-turn (see Checkpoint).
+		// A write failure fails the run rather than skipping: a chain with
+		// a hole resumes somewhere the operator was not told about.
+		// proven-by: TestRun_WritesABoundaryCheckpoint
+		// proven-by: TestRun_ACheckpointWriteFailureFailsTheRun
+		if loop.State() == Idle {
+			turn++
+			if err := boundary(); err != nil {
+				return err
+			}
+		}
 		if dErr != nil {
 			return dErr
 		}
