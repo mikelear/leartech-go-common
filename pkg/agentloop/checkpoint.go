@@ -129,8 +129,9 @@ func RestoreCheckpoint(b []byte, maxTools int) (*Loop, error) {
 	return l, nil
 }
 
-// Checkpoint returns the checkpoint the restored loop's NEXT checkpoint must
-// extend — its hash — so a resumed session chains onto the one it resumed.
+// CheckpointChainedFrom returns a checkpoint whose PrevHash is the
+// checkpoint the loop was restored from, so a resumed session chains onto
+// the one it resumed.
 //
 // The loop does not know its own history's hash (New does not take one), so
 // this asks the caller to supply the checkpoint that was restored; the
