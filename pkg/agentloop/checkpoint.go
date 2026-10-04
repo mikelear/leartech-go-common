@@ -8,13 +8,13 @@ import (
 	"strings"
 )
 
-// CheckpointVersion is the on-disk shape of a checkpoint. A future change
-// that a resumed reader must notice bumps this; a resume that does not
-// recognise the version refuses rather than guessing.
+// CheckpointVersion is the on-disk shape of a checkpoint.
+// proven-by: TestRestoreCheckpoint_RefusesAnUnknownVersion
 const CheckpointVersion = 1
 
-// Checkpoint is the loop's conversation at a boundary where it is safe to
-// stop and later continue: every turn ended, no tool call outstanding.
+// Checkpoint is the loop's conversation at a turn boundary — every turn
+// ended, no tool call outstanding — captured so a later session continues
+// from it.
 //
 // WHY A NEW TYPE RATHER THAN THE TRANSCRIPT. The transcript records kinds
 // and LENGTHS of what was shown, deliberately, so no test asserts on model
@@ -29,6 +29,7 @@ const CheckpointVersion = 1
 // the loop is Running or Asking would resume a half-executed chain of tool
 // calls, or answer a question nobody re-asked. Save refuses; the caller
 // retries at the next boundary. // proven-by: TestCheckpoint_RefusesAMidTurnState
+// proven-by: TestCheckpoint_ATurnBoundaryRoundTrips
 //
 // proven-by: TestCheckpoint_ATurnBoundaryRoundTrips
 // proven-by: TestCheckpoint_RefusesAMidTurnState
@@ -47,7 +48,8 @@ type Checkpoint struct {
 	PrevHash string `json:"prev_hash"`
 
 	// Hash is computed over (turn, prevHash, messages) at construction, so
-	// a copy of the file cannot claim to extend a chain it does not.
+	// a copied file does not extend the chain it was copied from.
+	// proven-by: TestCheckpoint_ARestoredSessionChainsOntoTheFileItResumed
 	Hash string `json:"hash"`
 
 	// Messages is the whole conversation, including the system message the
@@ -95,10 +97,9 @@ func (l *Loop) Checkpoint(turn int, prevHash string) (*Checkpoint, error) {
 // second way to change loop state would be a second place for the state to
 // go wrong. This is the same construction New performs, plus messages.
 //
-// The version is checked BEFORE anything else, and a message the caller
-// cannot act on says which version was found and which was expected — a
-// resume that read a future file and produced an empty conversation would
-// look like a success.
+// The version is checked BEFORE anything else, and the error names the
+// version found and the version expected — a resume that read a future
+// file and produced an empty conversation would read as a success.
 //
 // The CHAIN is not verified here. prev_hash links two checkpoints the
 // caller holds; this constructor's job is one checkpoint, and the caller —
@@ -107,7 +108,7 @@ func (l *Loop) Checkpoint(turn int, prevHash string) (*Checkpoint, error) {
 // maxTools is the caller's to choose again: the budget that ran out on the
 // session being resumed is not a value to inherit silently.
 //
-// proven-by: TestRestoreCheckpoint_RebuildsTheConversation
+// proven-by: TestRestoreCheckpoint_ContinuesAccumulating
 // proven-by: TestRestoreCheckpoint_ContinuesAccumulating
 // proven-by: TestRestoreCheckpoint_RefusesAnUnknownVersion
 // proven-by: TestRestoreCheckpoint_AnEmptyCheckpointIsAnError
@@ -151,7 +152,7 @@ func (l *Loop) CheckpointChainedFrom(restored *Checkpoint, turn int) (*Checkpoin
 //
 // Messages are marshalled deterministically (Go's json marshals struct
 // fields in declaration order, and this type has no maps), so the same
-// conversation always hashes the same.
+// conversation always hashes the same. // proven-by: TestCheckpoint_ATurnBoundaryRoundTrips
 func (c *Checkpoint) computeHash() string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s\x00%s", c.Turn, c.PrevHash, c.messagesKey())))
 	return hex.EncodeToString(sum[:])
