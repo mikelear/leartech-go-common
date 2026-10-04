@@ -130,8 +130,9 @@ func (r *Runner) Run(ctx context.Context, in Lines, system string, maxTools int)
 // Run takes a system prompt, and both paths share everything below.
 //
 // The caller supplies the checkpoint it restored so the first boundary the
-// resumed session crosses chains onto the file it resumed; the loop cannot
-// know that hash, New does not take one.
+// resumed session crosses chains onto the file it resumed; New does not take
+// the hash to chain from.
+//
 // proven-by: TestRunRestored_ContinuesTheConversationFromTheCheckpoint
 // proven-by: TestRunRestored_ChainsOntoTheCheckpointItResumed
 func (r *Runner) RunRestored(ctx context.Context, restored *Loop, from *Checkpoint,
