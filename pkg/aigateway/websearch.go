@@ -38,8 +38,8 @@ type SearchRequest struct {
 	Provider   string `json:"provider,omitempty"`
 }
 
-// Search runs one web search. It debits the key's budget exactly like a chat
-// call (one usage_event row, model=web_search), so it is never free.
+// Search runs one web search. It debits the key's budget the same way a chat
+// call does (one usage_event row, model=web_search) — metered on the gateway.
 //
 // proven-by: TestSearch_ForwardsProviderAndDecodesResults
 func (c *Client) Search(ctx context.Context, req SearchRequest) (SearchResults, error) {
