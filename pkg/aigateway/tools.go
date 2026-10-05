@@ -27,9 +27,9 @@ type Tool struct {
 	Type     string       `json:"type"`
 	Function ToolFunction `json:"function"`
 	// Available reports whether THIS credential may call it. The gateway
-	// lists unavailable tools too, deliberately: a client can show "this
-	// shell cannot search — it lacks gateway:web_search" instead of leaving
-	// the question unanswerable.
+	// lists unavailable tools too, deliberately: a client can show WHY a
+	// capability is missing (the Scope field names what would fix it)
+	// instead of leaving the question unanswerable.
 	Available bool `json:"available"`
 	// Scope names what a caller would need, so unavailable is actionable.
 	Scope string `json:"scope,omitempty"`
