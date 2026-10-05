@@ -24,6 +24,10 @@ type Effect string
 const (
 	// Reads looks at the machine without changing it.
 	Reads Effect = "reads"
+	// Spends calls a metered supplier on the operator's budget. It changes
+	// nothing on this machine, so it is not Writes; and it is not free, so
+	// it is not Reads. A search or a fetch through the gateway lands here.
+	Spends Effect = "spends"
 	// Writes changes files.
 	Writes Effect = "writes"
 	// Executes runs something, which can do anything the user can.
