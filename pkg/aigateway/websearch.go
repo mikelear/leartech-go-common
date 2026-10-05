@@ -42,6 +42,7 @@ type SearchRequest struct {
 // call does (one usage_event row, model=web_search) — metered on the gateway.
 //
 // proven-by: TestSearch_ForwardsProviderAndDecodesResults
+// proven-by: TestSearch_UpstreamErrorIsAnErrorNotZeroResults
 func (c *Client) Search(ctx context.Context, req SearchRequest) (SearchResults, error) {
 	var out SearchResults
 	err := c.do(ctx, http.MethodPost, "/v1/search", req, &out)
@@ -69,6 +70,7 @@ type WebSearchProvider struct {
 // what pre-provider-selection callers did.
 //
 // proven-by: TestWebSearchDiscovery_ListsProvidersAndDefault
+// proven-by: TestWebSearchDiscovery_OldGateway404IsAnErrorNotAnEmptyList
 func (c *Client) WebSearchDiscover(ctx context.Context) ([]WebSearchProvider, string, error) {
 	var r struct {
 		Object  string              `json:"object"`
