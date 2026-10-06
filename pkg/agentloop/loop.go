@@ -2,6 +2,7 @@ package agentloop
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -114,6 +115,14 @@ const (
 	// proven-by: TestLoop_DecliningTheBudgetStopsAsItAlwaysDid
 	AskToContinue
 )
+
+// ErrBudgetStop is what a declined budget question becomes. An unattended
+// runner has nobody to ask, so the decline is its normal end: the work so far
+// is worth preserving, and the caller should be able to tell "out of budget"
+// from "the model failed". errors.Is sees through fmt.Errorf's %w.
+//
+// proven-by: TestErrBudgetStop_TheDeclinedBudgetStopWrapsTheStop
+var ErrBudgetStop = errors.New("stopped: the tool budget for one input was reached")
 
 // ToolCall is one complete call. Arguments stay raw: the envelope is ours,
 // the payload is the model's.
@@ -315,9 +324,14 @@ func (l *Loop) budgetAnswered(e Event) []Action {
 		n := len(l.pending)
 		l.pending, l.answered = nil, nil
 		return []Action{
+			// ErrBudgetStop, not a bare error, so an unattended runner can
+			// tell "the brief ran out of tool budget" from "the model
+			// failed" and preserve work / hand off rather than reporting an
+			// undifferentiated crash. The message is unchanged.
+			// proven-by: TestErrBudgetStop_TheDeclinedBudgetStopWrapsTheStop
 			{Kind: ShowError, Err: fmt.Errorf(
 				"stopped: this turn would make %d more tool calls and the budget "+
-					"for one input is %d. Ask again to continue", n, l.maxTools)},
+					"for one input is %d. Ask again to continue: %w", n, l.maxTools, ErrBudgetStop)},
 			{Kind: AwaitInput},
 		}
 	}

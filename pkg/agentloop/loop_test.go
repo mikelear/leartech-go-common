@@ -3,6 +3,7 @@ package agentloop
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -419,5 +420,36 @@ func TestLoop_AGrantIsIgnoredWhenTheAnswerIsNo(t *testing.T) {
 	if l.maxTools != 1 {
 		t.Errorf("maxTools = %d, want 1 — a refusal carrying a number must "+
 			"not raise the ceiling", l.maxTools)
+	}
+}
+
+// The declined budget question is ErrBudgetStop through the error chain, so
+// an unattended runner can tell "out of budget" (work preserved, resume
+// later) from "the model failed". A bare fmt.Errorf would leave every caller
+// string-matching the message.
+//
+// proven-by: TestErrBudgetStop_TheDeclinedBudgetStopWrapsTheStop
+func TestErrBudgetStop_TheDeclinedBudgetStopWrapsTheStop(t *testing.T) {
+	l := New("", 2)
+	l.state = Asking
+	l.pending = []ToolCall{{ID: "1", Name: "t"}}
+	l.answered = nil
+
+	acts := l.Step(Event{Kind: BudgetAnswer, Allow: false})
+
+	var got error
+	for _, a := range acts {
+		if a.Kind == ShowError {
+			got = a.Err
+		}
+	}
+	if got == nil {
+		t.Fatal("the declined budget produced no ShowError")
+	}
+	if !errors.Is(got, ErrBudgetStop) {
+		t.Fatalf("the budget stop is not ErrBudgetStop through the chain: %v", got)
+	}
+	if !strings.Contains(got.Error(), "Ask again to continue") {
+		t.Errorf("the operator-facing message lost its guidance: %v", got)
 	}
 }
