@@ -203,6 +203,33 @@ func (c *Client) RevokeKey(ctx context.Context, keyid string) error {
 	return c.do(ctx, http.MethodDelete, "/admin/v1/keys/"+keyid, nil, nil)
 }
 
+// SetBudgetRequest is PUT /admin/v1/keys/{keyid}/budget.
+type SetBudgetRequest struct {
+	BudgetMicros int64 `json:"budget_micros"`
+}
+
+// SetBudgetResponse echoes what the gateway recorded.
+type SetBudgetResponse struct {
+	KeyID        string `json:"keyid"`
+	Tenant       string `json:"tenant"`
+	BudgetMicros int64  `json:"budget_micros"`
+}
+
+// SetBudget sets an ABSOLUTE monthly spend cap on a key, addressed by keyid.
+//
+// Unlike AmendKey (which may only NARROW a budget, keyed to keys_write), this
+// may RAISE a cap above the caller's own ceiling — so the gateway gates it on
+// the keys_admin scope, held by platform operators. Use it to lift a key that
+// has throttled a run to a 429 budget_exceeded.
+func (c *Client) SetBudget(ctx context.Context, keyid string, budgetMicros int64) (SetBudgetResponse, error) {
+	var r SetBudgetResponse
+	if err := c.do(ctx, http.MethodPut, "/admin/v1/keys/"+keyid+"/budget",
+		SetBudgetRequest{BudgetMicros: budgetMicros}, &r); err != nil {
+		return SetBudgetResponse{}, err
+	}
+	return r, nil
+}
+
 // Usage returns spend by key and model.
 func (c *Client) Usage(ctx context.Context) (UsageResponse, error) {
 	var r UsageResponse
