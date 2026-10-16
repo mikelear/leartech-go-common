@@ -5,22 +5,22 @@ go 1.26.0
 toolchain go1.27.2
 
 require (
-	github.com/MicahParks/keyfunc/v3 v3.8.0
-	github.com/alicebob/miniredis/v2 v2.38.0
-	github.com/gin-gonic/gin v1.10.0
+	github.com/MicahParks/keyfunc/v3 v3.8.1
+	github.com/alicebob/miniredis/v2 v2.39.0
+	github.com/gin-gonic/gin v1.10.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/redis/go-redis/v9 v9.7.3
-	github.com/rs/zerolog v1.33.0
+	github.com/redis/go-redis/v9 v9.8.0
+	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.12.1
-	go.mongodb.org/mongo-driver/v2 v2.4.2
+	go.mongodb.org/mongo-driver/v2 v2.4.3
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
-	golang.org/x/oauth2 v0.36.0
+	golang.org/x/oauth2 v0.37.0
 )
 
 require (
-	github.com/MicahParks/jwkset v0.11.0 // indirect
+	github.com/MicahParks/jwkset v0.11.1 // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
@@ -70,7 +70,7 @@ require (
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	golang.org/x/time v0.9.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260928230214-8a89bd6388cc // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc // indirect
 	google.golang.org/grpc v1.83.2 // indirect
