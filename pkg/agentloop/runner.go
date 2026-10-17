@@ -315,6 +315,15 @@ func (r *Runner) drive(ctx context.Context, loop *Loop, first Event) ([]error, e
 				queue = append(queue, Event{
 					Kind: BudgetAnswer, Allow: grant > 0, Grant: grant,
 				})
+			case ShowTruncated:
+				// The warning goes to the UI, not r.Out: it is not part of
+				// the answer, and a piped run's stdout is the answer. Quiet
+				// discards it, which is right for an unattended run — the
+				// transcript still records the truncated ModelDone.
+				// proven-by: TestRunner_ATruncatedTurnWarnsThroughTheUI
+				r.UI.Highlight("the reply was cut off before it finished (%s) — it is not a "+
+					"complete answer. Raise --max-tokens, or run `ship-proven shell compact` if "+
+					"the session has grown large, then resume.", truncationReason(a.Finish))
 			case AwaitInput:
 				if _, err := fmt.Fprintln(r.Out); err != nil {
 					return failed, fmt.Errorf("writing: %w", err)
@@ -577,4 +586,18 @@ func renderCalls(calls []ToolCall) json.RawMessage {
 		return nil
 	}
 	return b
+}
+
+// truncationReason turns the finish marker into words for the warning line.
+//
+// proven-by: TestRunner_ATruncatedTurnWarnsThroughTheUI
+func truncationReason(finish string) string {
+	switch finish {
+	case "length":
+		return "hit the reply token cap"
+	case "incomplete":
+		return "the stream ended early"
+	default:
+		return finish
+	}
 }
