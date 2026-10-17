@@ -82,6 +82,10 @@ type Action struct {
 	// Err is what went wrong, when Kind is ShowError.
 	Err error
 
+	// Finish is why a truncated turn ended, when Kind is ShowTruncated:
+	// "length" (hit max_tokens) or "incomplete" (stream closed early).
+	Finish string
+
 	// Pending, Used and Budget describe the tool budget, when Kind is
 	// AskToContinue. The caller needs all three to ask a question worth
 	// answering: how many more, how many already, and out of what.
@@ -101,6 +105,13 @@ const (
 	ShowReasoning
 	ShowError
 	AwaitInput
+
+	// ShowTruncated reports that the turn's reply was cut off before the
+	// model finished — it hit max_tokens, or the stream closed early. The
+	// caller renders a warning so a half-answer is not mistaken for a
+	// finished one; the loop still awaits input next.
+	// proven-by: TestLoop_ATruncatedReplySaysSoRatherThanLookingFinished
+	ShowTruncated
 
 	// AskToContinue reports that this input has reached its tool budget
 	// and asks whether to allow another budget's worth.
@@ -285,6 +296,22 @@ func (l *Loop) Step(e Event) []Action {
 func (l *Loop) turnEnded(e Event) []Action {
 	if len(l.pending) == 0 {
 		l.state = Idle
+		// A TURN THAT ENDED BECAUSE THE REPLY HIT max_tokens IS NOT A TURN
+		// THAT FINISHED. The model was cut off mid-sentence; dropping
+		// straight back to the prompt makes a truncated "I'll build it:"
+		// read like a complete answer, so the operator says "yes ok" to a
+		// model that never did anything and never will — the reply was the
+		// whole turn. Say so, loudly, and still await input: the fix the
+		// operator needs (a larger --max-tokens, or /compact) is theirs to
+		// make, but they cannot make it if nothing tells them the answer
+		// was clipped. "length" is OpenAI's finish_reason for this;
+		// "incomplete" is the runner's own marker for a stream that closed
+		// with no terminal frame, which is the same class of half-answer.
+		// proven-by: TestLoop_ATruncatedReplySaysSoRatherThanLookingFinished
+		// proven-by: TestLoop_ACompleteReplyDoesNotWarn
+		if e.Finish == "length" || e.Finish == "incomplete" {
+			return []Action{{Kind: ShowTruncated, Finish: e.Finish}, {Kind: AwaitInput}}
+		}
 		return []Action{{Kind: AwaitInput}}
 	}
 

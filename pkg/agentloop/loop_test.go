@@ -453,3 +453,44 @@ func TestErrBudgetStop_TheDeclinedBudgetStopWrapsTheStop(t *testing.T) {
 		t.Errorf("the operator-facing message lost its guidance: %v", got)
 	}
 }
+
+// A reply cut off at max_tokens says so rather than looking finished: the
+// loop emits ShowTruncated before awaiting input, so a clipped "I'll build
+// it:" is not mistaken for a complete answer the operator approves.
+func TestLoop_ATruncatedReplySaysSoRatherThanLookingFinished(t *testing.T) {
+	l := New("", 5)
+	l.Step(Event{Kind: UserInput, Text: "do the thing"})
+	l.Step(Event{Kind: ModelText, Text: "I'll build it:"})
+	got := l.Step(Event{Kind: ModelDone, Finish: "length"})
+	if len(got) != 2 || got[0].Kind != ShowTruncated || got[1].Kind != AwaitInput {
+		t.Fatalf("got %v, want [ShowTruncated AwaitInput]", kinds(got))
+	}
+	if got[0].Finish != "length" {
+		t.Errorf("ShowTruncated.Finish = %q, want length", got[0].Finish)
+	}
+	if l.State() != Idle {
+		t.Errorf("state = %v, want idle", l.State())
+	}
+
+	// The same applies to a stream that closed with no terminal frame: the
+	// runner marks that "incomplete", and it is the same half-answer.
+	l2 := New("", 5)
+	l2.Step(Event{Kind: UserInput, Text: "again"})
+	l2.Step(Event{Kind: ModelText, Text: "partial"})
+	got2 := l2.Step(Event{Kind: ModelDone, Finish: "incomplete"})
+	if len(got2) != 2 || got2[0].Kind != ShowTruncated {
+		t.Fatalf("got %v, want a ShowTruncated for an incomplete stream", kinds(got2))
+	}
+}
+
+// A complete reply does NOT warn: a normal stop goes straight to the prompt,
+// so the warning is reserved for the clipped case and does not cry wolf.
+func TestLoop_ACompleteReplyDoesNotWarn(t *testing.T) {
+	l := New("", 5)
+	l.Step(Event{Kind: UserInput, Text: "hello"})
+	l.Step(Event{Kind: ModelText, Text: "a full answer."})
+	got := l.Step(Event{Kind: ModelDone, Finish: "stop"})
+	if len(got) != 1 || got[0].Kind != AwaitInput {
+		t.Fatalf("got %v, want just AwaitInput for a normal stop", kinds(got))
+	}
+}

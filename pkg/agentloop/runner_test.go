@@ -1122,3 +1122,47 @@ func TestRunner_EachTurnMarksItsOwnTail(t *testing.T) {
 			len(fg.seen[1].Messages), len(fg.seen[0].Messages))
 	}
 }
+
+// capUI records the Highlight calls, so a test can assert the truncation
+// warning reached the operator's channel rather than stdout.
+type capUI struct {
+	Quiet
+	highlights []string
+}
+
+func (c *capUI) Highlight(format string, a ...any) {
+	c.highlights = append(c.highlights, fmt.Sprintf(format, a...))
+}
+
+// A turn cut off at max_tokens warns through the UI, not into the answer
+// stream: the operator is told the reply is incomplete, and stdout (the
+// answer) carries only the partial text.
+func TestRunner_ATruncatedTurnWarnsThroughTheUI(t *testing.T) {
+	reg := NewRegistry()
+	if err := reg.Add(ReadFile(t.TempDir())); err != nil {
+		t.Fatal(err)
+	}
+	fg := &fakeGateway{turns: [][]aigateway.StreamChunk{
+		{text("I'll build it:"), done("length")},
+	}}
+	ui := &capUI{}
+	var out, tr bytes.Buffer
+	r := &Runner{Model: "claude", Client: fg, Tools: reg,
+		Out: &out, Transcript: NewTranscript(&tr), UI: ui}
+	if err := r.Run(context.Background(), NewPipeLines(strings.NewReader("do it\n")), "", 5); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(ui.highlights) != 1 {
+		t.Fatalf("highlights = %v, want one truncation warning", ui.highlights)
+	}
+	if !strings.Contains(ui.highlights[0], "cut off") {
+		t.Errorf("warning does not say the reply was cut off: %q", ui.highlights[0])
+	}
+	// The partial answer is on stdout; the warning is not.
+	if !strings.Contains(out.String(), "I'll build it:") {
+		t.Errorf("the partial reply is missing from stdout: %q", out.String())
+	}
+	if strings.Contains(out.String(), "cut off") {
+		t.Error("the warning leaked into the answer stream; it belongs on the UI channel")
+	}
+}
