@@ -59,7 +59,7 @@ type CompactOptions struct {
 // can assert on it without re-deriving the arithmetic.
 type CompactReport struct {
 	// BeforeChars and AfterChars are the conversation estimate either side,
-	// measured the gateway's way. AfterChars <= BeforeChars always.
+	// measured the gateway's way (chars, as EstimateTokens divides by four).
 	BeforeChars int
 	AfterChars  int
 
@@ -86,8 +86,8 @@ const (
 //
 // WHY THESE TWO KINDS AND NOTHING ELSE. A conversation's weight is three
 // things: the user's turns, the assistant's prose and tool CALLS, and the
-// tool RESULTS those calls returned. The user's turns are the task and must
-// left alone. The assistant's PROSE is the reasoning the next turn relies
+// tool RESULTS those calls returned. The user's turns carry the task, left
+// alone. The assistant's PROSE is the reasoning the next turn relies
 // on, so it is left alone too. The two kinds that are both
 // heavy and re-derivable are the tool RESULTS (a file the agent read, a
 // listing it took — it can read it again) and, once a result is gone, the
