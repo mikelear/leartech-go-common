@@ -27,14 +27,15 @@ type CompactOptions struct {
 	// KeepHeadTurns is how many of the EARLIEST user turns to protect from
 	// elision, counted in user messages. The opening of a session carries
 	// the task and the ground rules a later turn still refers back to, so
-	// cutting it is the one elision that silently changes the answer. One is
+	// cutting it is the one elision a reader is most likely to regret. One is
 	// a sensible floor; zero protects none.
+	// proven-by: TestCompact_ProtectsTheHeadAndTailTurns
 	KeepHeadTurns int
 
 	// KeepTailTurns is how many of the MOST RECENT user turns to protect,
-	// counted in user messages. The tail is what the next turn actually
-	// builds on, so it is never a candidate. One is the floor; zero protects
-	// none, which is almost never what a resume wants.
+	// counted in user messages. The tail is what the next turn builds on.
+	// One is the floor; zero protects none.
+	// proven-by: TestCompact_ProtectsTheHeadAndTailTurns
 	KeepTailTurns int
 
 	// ElideToolCallArgs also stubs the ARGUMENTS of an assistant tool call
@@ -68,8 +69,9 @@ type CompactReport struct {
 
 	// Fit is whether AfterChars reached TargetChars. False with a non-zero
 	// Elided means everything eligible was compacted and the conversation is
-	// still over target — the caller's signal that the tail alone is too big
-	// and compaction cannot save this one.
+	// still over target — the caller's signal that the protected tail alone
+	// exceeds the target.
+	// proven-by: TestCompact_ReportsWhenItCannotFit
 	Fit bool
 }
 
@@ -85,8 +87,8 @@ const (
 // WHY THESE TWO KINDS AND NOTHING ELSE. A conversation's weight is three
 // things: the user's turns, the assistant's prose and tool CALLS, and the
 // tool RESULTS those calls returned. The user's turns are the task and must
-// not be touched. The assistant's PROSE is the reasoning the next turn
-// depends on and is likewise never touched. The two kinds that are both
+// left alone. The assistant's PROSE is the reasoning the next turn relies
+// on, so it is left alone too. The two kinds that are both
 // heavy and re-derivable are the tool RESULTS (a file the agent read, a
 // listing it took — it can read it again) and, once a result is gone, the
 // ARGUMENTS of the call that asked for it (which were only ever a means to
@@ -143,10 +145,10 @@ func Compact(src *Checkpoint, opt CompactOptions) (*Checkpoint, CompactReport, e
 		stub = defaultCompactStub
 	}
 
-	// Work on a copy: the source checkpoint stays the untouched original the
-	// caller keeps, so a compaction can always be redone from it. The
-	// ToolCalls slice is copied too, so stubbing an argument does not reach
-	// back through the shared backing array into the source.
+	// Work on a copy so the source checkpoint is left as the caller's
+	// original. The ToolCalls slice is copied too, so stubbing an argument
+	// does not reach back through a shared backing array into the source.
+	// proven-by: TestCompact_ElidesToolCallArgsOnlyForElidedResults
 	msgs := make([]Message, len(src.Messages))
 	copy(msgs, src.Messages)
 
@@ -317,8 +319,10 @@ func rechained(src *Checkpoint, msgs []Message) (*Checkpoint, error) {
 		Messages: msgs,
 	}
 	c.Hash = c.computeHash()
-	// A compacted conversation must still be restoreable: a bug that emptied
-	// it would otherwise write a valid-looking file that resumes to nothing.
+	// A compacted conversation is re-validated through RestoreCheckpoint so a
+	// bug that emptied it is caught here rather than written as a
+	// valid-looking file that resumes to nothing.
+	// proven-by: TestCompact_KeepsTheConversationWellFormed
 	b, err := json.Marshal(c)
 	if err != nil {
 		return nil, fmt.Errorf("compact: marshalling the compacted checkpoint: %w", err)

@@ -230,8 +230,6 @@ func TestEstimateTokens_IsCharsOverFour(t *testing.T) {
 // synthetically rather than committing a 1.8MB real conversation: a generator
 // is deterministic, reviewable, and carries no real content, while exercising
 // exactly the two-pass path the real file needed.
-//
-// proven-by: itself — the generated session mirrors the regression's shape.
 func TestCompact_TheRealSessionFitsTheWindow(t *testing.T) {
 	// 68 turns; each turn: a user line, an assistant tool call with heavy
 	// arguments, and a heavy tool result. Head and tail turns stay small so
