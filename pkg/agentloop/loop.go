@@ -299,14 +299,12 @@ func (l *Loop) turnEnded(e Event) []Action {
 		// A TURN THAT ENDED BECAUSE THE REPLY HIT max_tokens IS NOT A TURN
 		// THAT FINISHED. The model was cut off mid-sentence; dropping
 		// straight back to the prompt makes a truncated "I'll build it:"
-		// read like a complete answer, so the operator says "yes ok" to a
-		// model that never did anything and never will — the reply was the
-		// whole turn. Say so, loudly, and still await input: the fix the
-		// operator needs (a larger --max-tokens, or /compact) is theirs to
-		// make, but they cannot make it if nothing tells them the answer
-		// was clipped. "length" is OpenAI's finish_reason for this;
-		// "incomplete" is the runner's own marker for a stream that closed
-		// with no terminal frame, which is the same class of half-answer.
+		// indistinguishable from a complete answer. So this emits a
+		// ShowTruncated for the caller to surface, and still awaits input —
+		// the remedy (a larger --max-tokens, or compacting and resuming) is
+		// the operator's to choose. "length" is OpenAI's finish_reason for a
+		// max_tokens cut; "incomplete" is the runner's marker for a stream
+		// that closed with no terminal frame, the same class of half-answer.
 		// proven-by: TestLoop_ATruncatedReplySaysSoRatherThanLookingFinished
 		// proven-by: TestLoop_ACompleteReplyDoesNotWarn
 		if e.Finish == "length" || e.Finish == "incomplete" {
