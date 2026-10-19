@@ -610,3 +610,52 @@ func (c *Client) Pricing(ctx context.Context) (PricingResponse, error) {
 	}
 	return r, nil
 }
+
+// TransformSessionRequest asks the gateway to rewrite a saved session so it can
+// be resumed on a DIFFERENT model than the one it was recorded against.
+//
+// Checkpoint and the returned one are carried as raw JSON: the gateway speaks
+// the agentloop.Checkpoint shape, but this package does not depend on agentloop
+// (a client library should not pull the agent loop in), so the caller marshals
+// its Checkpoint to json.RawMessage and unmarshals the result back. The bytes
+// are the same either way.
+type TransformSessionRequest struct {
+	TargetModel         string          `json:"target_model"`
+	Checkpoint          json.RawMessage `json:"checkpoint"`
+	SourceModel         string          `json:"source_model,omitempty"`
+	ReplyHeadroomTokens int             `json:"reply_headroom_tokens,omitempty"`
+}
+
+// TransformSessionResponse is the gateway's rewritten session plus a record of
+// what it changed.
+type TransformSessionResponse struct {
+	Object      string          `json:"object"`
+	Checkpoint  json.RawMessage `json:"checkpoint"`
+	TargetModel string          `json:"target_model"`
+	Report      TransformReport `json:"report"`
+}
+
+// TransformReport mirrors the gateway's report: what the switch changed and why.
+type TransformReport struct {
+	BeforeTokens int      `json:"before_tokens"`
+	AfterTokens  int      `json:"after_tokens"`
+	TargetMaxCtx int      `json:"target_max_ctx"`
+	Compacted    int      `json:"compacted"`
+	Fit          bool     `json:"fit"`
+	BridgeAdded  bool     `json:"bridge_added"`
+	Notes        []string `json:"notes"`
+}
+
+// TransformSession rewrites a saved session for a different model.
+//
+// POSTs /v1/sessions/transform. The credential may be a JWT or an sk-lt-
+// virtual key with chat scope, the same credential a chat turn uses.
+//
+// proven-by: TestTransformSession_PostsToTheEndpoint
+func (c *Client) TransformSession(ctx context.Context, req TransformSessionRequest) (TransformSessionResponse, error) {
+	var r TransformSessionResponse
+	if err := c.do(ctx, http.MethodPost, "/v1/sessions/transform", req, &r); err != nil {
+		return TransformSessionResponse{}, err
+	}
+	return r, nil
+}
