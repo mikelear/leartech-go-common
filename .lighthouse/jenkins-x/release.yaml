@@ -55,7 +55,7 @@ spec:
         - image: uses:jenkins-x/jx3-pipeline-catalog/tasks/git-clone/git-clone.yaml@versionStream
           name: ""
           resources: {}
-        - image: alpine:3.20
+        - image: alpine:3.24
           name: next-version
           resources: {}
           script: |
@@ -68,7 +68,7 @@ spec:
             curl -fsSL https://github.com/jenkins-x-plugins/jx-release-version/releases/download/v2.8.4/jx-release-version-linux-amd64.tar.gz | tar xz -C /usr/local/bin
             jx-release-version --previous-version from-tag > VERSION
             echo "Next version: $(cat VERSION)"
-        - image: alpine:3.20
+        - image: alpine:3.24
           name: tag-release
           env:
             # Cluster identity for the primary-cluster guard. Both clusters
@@ -123,7 +123,7 @@ spec:
             else
               echo "==> CLUSTER_ID=${CLUSTER_ID:-unknown}; gcp tags for all clusters. Version computed cleanly: v${VERSION}."
             fi
-        - image: alpine/k8s:1.28.4
+        - image: alpine/k8s:1.37.1
           name: trigger-renovate
           resources: {}
           script: |
