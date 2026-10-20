@@ -324,6 +324,14 @@ func (r *Runner) drive(ctx context.Context, loop *Loop, first Event) ([]error, e
 				r.UI.Highlight("the reply was cut off before it finished (%s) — it is not a "+
 					"complete answer. Raise --max-tokens, or run `ship-proven shell compact` if "+
 					"the session has grown large, then resume.", truncationReason(a.Finish))
+			case ShowNote:
+				// A dim remark through the UI, not r.Out: it is not the answer.
+				// Quiet discards it (a piped run wants only the answer), so an
+				// unattended run is unaffected; an interactive one sees why the
+				// prompt came back empty instead of a bare line.
+				// proven-by: TestRunner_ASilentTurnNoteIsShownThroughTheUI
+				r.UI.FirstOutput()
+				r.UI.Note("%s", a.Text)
 			case AwaitInput:
 				if _, err := fmt.Fprintln(r.Out); err != nil {
 					return failed, fmt.Errorf("writing: %w", err)

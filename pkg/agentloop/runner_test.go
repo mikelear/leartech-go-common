@@ -1128,10 +1128,15 @@ func TestRunner_EachTurnMarksItsOwnTail(t *testing.T) {
 type capUI struct {
 	Quiet
 	highlights []string
+	notes      []string
 }
 
 func (c *capUI) Highlight(format string, a ...any) {
 	c.highlights = append(c.highlights, fmt.Sprintf(format, a...))
+}
+
+func (c *capUI) Note(format string, a ...any) {
+	c.notes = append(c.notes, fmt.Sprintf(format, a...))
 }
 
 // A turn cut off at max_tokens warns through the UI, not into the answer
@@ -1164,5 +1169,32 @@ func TestRunner_ATruncatedTurnWarnsThroughTheUI(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "cut off") {
 		t.Error("the warning leaked into the answer stream; it belongs on the UI channel")
+	}
+}
+
+// A turn that ends with no assistant text surfaces a dim note through the UI —
+// not into the answer stream — so the operator sees why the prompt came back
+// empty instead of a bare line. A quiet/piped run discards it.
+func TestRunner_ASilentTurnNoteIsShownThroughTheUI(t *testing.T) {
+	reg := NewRegistry()
+	fg := &fakeGateway{turns: [][]aigateway.StreamChunk{
+		{done("stop")}, // no text this turn
+	}}
+	ui := &capUI{}
+	var out, tr bytes.Buffer
+	r := &Runner{Model: "claude", Client: fg, Tools: reg,
+		Out: &out, Transcript: NewTranscript(&tr), UI: ui}
+	if err := r.Run(context.Background(), NewPipeLines(strings.NewReader("do it\n")), "", 5); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(ui.notes) != 1 {
+		t.Fatalf("notes = %v, want one silent-turn note", ui.notes)
+	}
+	if !strings.Contains(ui.notes[0], "without a message") {
+		t.Errorf("note does not explain the empty turn: %q", ui.notes[0])
+	}
+	// The note is NOT in the answer stream.
+	if strings.Contains(out.String(), "without a message") {
+		t.Error("the silent-turn note leaked into the answer stream; it belongs on the UI channel")
 	}
 }
