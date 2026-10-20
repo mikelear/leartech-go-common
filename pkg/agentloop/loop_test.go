@@ -494,3 +494,50 @@ func TestLoop_ACompleteReplyDoesNotWarn(t *testing.T) {
 		t.Fatalf("got %v, want just AwaitInput for a normal stop", kinds(got))
 	}
 }
+
+// A turn that ends with no assistant text shows a visible note, not a bare
+// prompt — the "it came straight back with nothing" case. The marker is a
+// ShowNote (dim, discarded by a quiet run), followed by AwaitInput.
+func TestLoop_ASilentTurnSaysSoRatherThanLookingLikeNothingHappened(t *testing.T) {
+	l := New("", 5)
+	l.Step(Event{Kind: UserInput, Text: "do it"})
+	// No ModelText this turn — the model ends end_turn with no words.
+	got := l.Step(Event{Kind: ModelDone, Finish: "stop"})
+	if len(got) != 2 || got[0].Kind != ShowNote || got[1].Kind != AwaitInput {
+		t.Fatalf("got %v, want [ShowNote AwaitInput] for a silent turn", kinds(got))
+	}
+	if got[0].Text == "" {
+		t.Error("the silent-turn note has no text to show")
+	}
+	if l.State() != Idle {
+		t.Errorf("state = %v, want idle", l.State())
+	}
+}
+
+// A turn that DID show text ends plainly (no note) — the note is only for the
+// genuinely empty turn.
+func TestLoop_ATurnThatSpokeDoesNotGetTheSilentNote(t *testing.T) {
+	l := New("", 5)
+	l.Step(Event{Kind: UserInput, Text: "hi"})
+	l.Step(Event{Kind: ModelText, Text: "hello"})
+	got := l.Step(Event{Kind: ModelDone, Finish: "stop"})
+	if len(got) != 1 || got[0].Kind != AwaitInput {
+		t.Fatalf("got %v, want just AwaitInput when the turn spoke", kinds(got))
+	}
+}
+
+// A turn that ran a tool but then ended with no closing text still gets the
+// note — the tool lines are not the model's message, and ending silent after
+// them is the same bare-prompt surprise.
+func TestLoop_ASilentTurnAfterAToolStillSaysSo(t *testing.T) {
+	l := New("", 5)
+	l.Step(Event{Kind: UserInput, Text: "read it"})
+	l.Step(Event{Kind: ModelToolCall, ToolCall: call("c1", "local__read_file")})
+	l.Step(Event{Kind: ModelDone, Finish: "tool_calls"}) // runs the tool
+	l.Step(Event{Kind: ToolResult, ToolCall: call("c1", "local__read_file"), Text: "data"})
+	// The resumed turn says nothing and ends.
+	got := l.Step(Event{Kind: ModelDone, Finish: "stop"})
+	if len(got) != 2 || got[0].Kind != ShowNote || got[1].Kind != AwaitInput {
+		t.Fatalf("got %v, want [ShowNote AwaitInput]", kinds(got))
+	}
+}

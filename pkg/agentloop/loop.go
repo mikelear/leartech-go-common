@@ -113,6 +113,13 @@ const (
 	// proven-by: TestLoop_ATruncatedReplySaysSoRatherThanLookingFinished
 	ShowTruncated
 
+	// ShowNote is an informational line the caller renders dimly — not part
+	// of the model's answer and not an error. Used when a turn ends with no
+	// assistant text, so an operator sees "the model ended the turn without a
+	// message" instead of a bare prompt. A piped/quiet run discards it.
+	// proven-by: TestLoop_ASilentTurnSaysSoRatherThanLookingLikeNothingHappened
+	ShowNote
+
 	// AskToContinue reports that this input has reached its tool budget
 	// and asks whether to allow another budget's worth.
 	//
@@ -208,6 +215,14 @@ type Loop struct {
 	maxTools int
 	used     int
 
+	// textShownThisTurn records whether the model emitted any assistant text
+	// since the last user input. A turn that ends with no pending tool calls
+	// and no text shown dropped the operator straight back to a bare prompt,
+	// indistinguishable from a crash or a lost reply. turnEnded uses this to
+	// surface a visible marker instead of silence.
+	// proven-by: TestLoop_ASilentTurnSaysSoRatherThanLookingLikeNothingHappened
+	textShownThisTurn bool
+
 	// budget is the original ceiling, kept so a granted continuation is
 	// one more of what the operator asked for rather than one more of
 	// whatever it has grown to.
@@ -248,11 +263,15 @@ func (l *Loop) Step(e Event) []Action {
 			return nil
 		}
 		l.used = 0
+		l.textShownThisTurn = false
 		l.messages = append(l.messages, Message{Role: "user", Content: e.Text})
 		l.state = Awaiting
 		return []Action{{Kind: SendTurn, Send: l.conversation()}}
 
 	case ModelText:
+		if e.Text != "" {
+			l.textShownThisTurn = true
+		}
 		return []Action{{Kind: ShowText, Text: e.Text}}
 
 	case ModelReasoning:
@@ -309,6 +328,16 @@ func (l *Loop) turnEnded(e Event) []Action {
 		// proven-by: TestLoop_ACompleteReplyDoesNotWarn
 		if e.Finish == "length" || e.Finish == "incomplete" {
 			return []Action{{Kind: ShowTruncated, Finish: e.Finish}, {Kind: AwaitInput}}
+		}
+		// A TURN THAT SHOWED NOTHING IS NOT NOTHING HAPPENING. The model can
+		// end a turn with no assistant text — all its content went into tool
+		// calls on earlier steps, or the final frame carried none. Dropping
+		// straight to a bare prompt reads as a crash or a lost reply. Emit a
+		// visible, dim marker so it is obvious the turn ended on purpose with
+		// no message, rather than leaving the operator staring at an empty line.
+		// proven-by: TestLoop_ASilentTurnSaysSoRatherThanLookingLikeNothingHappened
+		if !l.textShownThisTurn {
+			return []Action{{Kind: ShowNote, Text: "the model ended the turn without a message"}, {Kind: AwaitInput}}
 		}
 		return []Action{{Kind: AwaitInput}}
 	}
