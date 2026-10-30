@@ -114,7 +114,12 @@ func Wait(root string, timeout time.Duration) Tool {
 			if strings.TrimSpace(in.Command) == "" {
 				return "", errors.New("command is required")
 			}
-			return waitForCommand(root, in.Command, timeout, defaultWaitInterval)
+			cmd, note := stripLeadingSleep(in.Command)
+			out, err := waitForCommand(root, cmd, timeout, defaultWaitInterval)
+			if note != "" {
+				out = note + "\n\n" + out
+			}
+			return out, err
 		},
 	}
 }
@@ -222,6 +227,46 @@ func runOnce(ctx context.Context, dir, command string) (string, bool) {
 	}
 	return body, runErr == nil
 }
+
+// stripLeadingSleep removes a pointless `sleep N;` from the FRONT of a wait
+// command and returns a note saying it did.
+//
+// WHY. local__wait already re-runs the command every few seconds until it
+// succeeds, so a model that writes `sleep 100; gh pr checks ...` as the wait
+// command pays the 100s on the FIRST attempt for nothing — the poll loop is
+// the wait. Observed live: a model moved from sleep-in-bash to
+// sleep-prefixed-wait, which is harmless but slower and misleading. Stripping
+// the prefix makes the first poll immediate and tells the model why, so the
+// habit corrects rather than persists.
+//
+// ONLY A LEADING sleep, and only the sleep itself: a `sleep` inside the real
+// command (a retry backoff within an until-loop) is left untouched, because
+// that one is doing a job the poll interval does not.
+//
+// proven-by: TestStripLeadingSleep_RemovesALeadingSleepAndExplains
+// proven-by: TestStripLeadingSleep_LeavesACommandWithoutALeadingSleep
+// proven-by: TestStripLeadingSleep_LeavesASleepInsideTheCommand
+func stripLeadingSleep(command string) (stripped, note string) {
+	m := leadingSleepPrefixRe.FindString(command)
+	if m == "" {
+		return command, ""
+	}
+	rest := strings.TrimLeft(command[len(m):], " \t")
+	if rest == "" {
+		// The whole command was just a sleep — nothing to wait ON. Leave it;
+		// waitForCommand will run it and succeed, which is the caller's intent
+		// however odd, and stripping to empty would be a different command.
+		return command, ""
+	}
+	return rest, "[shell] dropped a leading `" + strings.TrimSpace(m) +
+		"` — local__wait re-runs the command until it succeeds, so sleeping first only delays the first check."
+}
+
+// A leading `sleep <n>` followed by `;` or `&&` and more command. Anchored at
+// the start (after optional whitespace); the separator is required, so a bare
+// `sleep 5` with nothing after it does not match (handled as "the whole
+// command is a sleep" above).
+var leadingSleepPrefixRe = regexp.MustCompile(`^\s*sleep\s+[0-9.]+[a-z]*\s*(;|&&)\s*`)
 
 // leadingSleep reports whether a script's first real command is `sleep`.
 //

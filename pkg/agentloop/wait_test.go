@@ -128,3 +128,67 @@ func TestLeadingSleep_IgnoresAScriptWithNoSleep(t *testing.T) {
 		t.Error("a script with no sleep matched")
 	}
 }
+
+func TestStripLeadingSleep_RemovesALeadingSleepAndExplains(t *testing.T) {
+	for _, cmd := range []string{
+		"sleep 100; gh pr checks 42",
+		"sleep 30 && kubectl get po",
+		"  sleep 45 ;  kubectl -n x get pods",
+	} {
+		got, note := stripLeadingSleep(cmd)
+		if strings.HasPrefix(strings.TrimSpace(got), "sleep") {
+			t.Errorf("stripLeadingSleep(%q) left the sleep: %q", cmd, got)
+		}
+		if note == "" {
+			t.Errorf("stripLeadingSleep(%q) stripped but did not explain", cmd)
+		}
+	}
+}
+
+func TestStripLeadingSleep_LeavesACommandWithoutALeadingSleep(t *testing.T) {
+	for _, cmd := range []string{
+		"gh pr checks 42",
+		"until kubectl get po | grep Running; do sleep 5; done",
+	} {
+		got, note := stripLeadingSleep(cmd)
+		if got != cmd || note != "" {
+			t.Errorf("stripLeadingSleep(%q) = (%q,%q), want it unchanged", cmd, got, note)
+		}
+	}
+}
+
+// A sleep INSIDE the command (a retry backoff within a loop) is left alone —
+// only a leading sleep-then-real-command is the anti-pattern.
+func TestStripLeadingSleep_LeavesASleepInsideTheCommand(t *testing.T) {
+	cmd := "for i in 1 2 3; do sleep 2; kubectl get po; done"
+	got, note := stripLeadingSleep(cmd)
+	if got != cmd || note != "" {
+		t.Errorf("stripLeadingSleep(%q) = (%q,%q), want it unchanged", cmd, got, note)
+	}
+}
+
+// A bare `sleep 5` with nothing after it is left as-is: there is nothing to
+// wait ON, and stripping to empty would be a different command.
+func TestStripLeadingSleep_LeavesABareSleep(t *testing.T) {
+	got, note := stripLeadingSleep("sleep 5")
+	if got != "sleep 5" || note != "" {
+		t.Errorf("stripLeadingSleep bare sleep = (%q,%q), want unchanged", got, note)
+	}
+}
+
+// End to end: a sleep-prefixed wait command still succeeds, AND the result
+// carries the note — so the model learns the prefix was pointless.
+func TestWait_StripsALeadingSleepFromTheCommand(t *testing.T) {
+	args, _ := json.Marshal(map[string]string{"command": "sleep 2; true"})
+	start := time.Now()
+	out, err := Wait(t.TempDir(), time.Minute).Run(args)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("took %s; the leading sleep was not stripped (the first poll waited 2s)", took)
+	}
+	if !strings.Contains(out, "dropped a leading") {
+		t.Errorf("out = %q, want the note that the sleep was dropped", out)
+	}
+}
