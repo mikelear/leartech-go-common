@@ -59,7 +59,7 @@ func Bash(root string, timeout time.Duration) Tool {
 	// nudged is per-tool, so per-run: one Bash() is built per shell/agent
 	// and used for the whole run. A pointer in the closure gives the sleep
 	// nudge the one-shot-until-reset memory it needs without a new field on
-	// any shared type. // proven-by: TestBash_TheSleepNudgeFiresOnceThenResets
+	// any shared type. // proven-by: TestSleepNudge_DoesNotFireTwiceInARow
 	nudged := new(bool)
 	return Tool{
 		Name:   "local__bash",
