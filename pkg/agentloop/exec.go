@@ -38,22 +38,37 @@ const maxExecOutput = 64 * 1024
 // is one element away, and it costs the operator the ability to read what
 // they are approving as a single piece of text.
 //
+// THE TIMEOUT IS NAMED IN THE DESCRIPTION, not hidden. A model that wrote
+// `sleep 300` under a two-minute ceiling had its sleep cut to two minutes
+// with no word of the ceiling, so it reasoned on a duration that did not
+// run. Stating the limit where the model reads the tool is the fix for the
+// cause; the per-call nudge (see sleepNudge) is the fix for the symptom
+// when it reaches for sleep anyway. // proven-by: TestBash_TheDescriptionNamesTheTimeout
+//
 // proven-by: TestBash_RunsAScriptAndReturnsItsOutput
 // proven-by: TestBash_RunsInTheRootNotTheProcessDirectory
 // proven-by: TestBash_AFailingScriptReturnsItsOutputAndStatus
 // proven-by: TestBash_ATimeoutIsReportedNotHung
 // proven-by: TestBash_LargeOutputIsCappedAndSaysSo
 // proven-by: TestBash_AnEmptyScriptIsRefused
+// proven-by: TestBash_TheDescriptionNamesTheTimeout
 func Bash(root string, timeout time.Duration) Tool {
 	if timeout <= 0 {
 		timeout = DefaultExecTimeout
 	}
+	// nudged is per-tool, so per-run: one Bash() is built per shell/agent
+	// and used for the whole run. A pointer in the closure gives the sleep
+	// nudge the one-shot-until-reset memory it needs without a new field on
+	// any shared type. // proven-by: TestSleepNudge_DoesNotFireTwiceInARow
+	nudged := new(bool)
 	return Tool{
 		Name:   "local__bash",
 		Effect: Executes,
-		Description: "Run a shell script in the working directory. The whole " +
-			"script is shown to the operator for approval before it runs, so " +
-			"write it to be read: one purpose, no surprises.",
+		Description: fmt.Sprintf("Run a shell script in the working directory. The whole "+
+			"script is shown to the operator for approval before it runs, so "+
+			"write it to be read: one purpose, no surprises. A script is killed "+
+			"after %s; to wait for something to happen, use local__wait rather "+
+			"than `sleep`.", timeout),
 		Schema: json.RawMessage(`{
 		  "type":"object",
 		  "properties":{"script":{"type":"string","description":"the shell script to run"}},
@@ -75,9 +90,48 @@ func Bash(root string, timeout time.Duration) Tool {
 			if in.Script == "" {
 				return "", errors.New("script is required")
 			}
-			return runScript(root, in.Script, timeout)
+			out, err := runScript(root, in.Script, timeout)
+			return sleepNudge(in.Script, out, nudged), err
 		},
 	}
+}
+
+// sleepNudge appends a one-time pointer to local__wait when a script leads
+// with `sleep`, and resets so the pointer can fire again later in the run.
+//
+// ONCE, THEN QUIET, THEN AGAIN. A nudge on every sleep is nagging: a model
+// with a real reason to sleep (it told us nothing, but there may be one)
+// would see the same line on every call and the signal would become noise.
+// So the first leading-sleep script gets the nudge and the flag is set; a
+// second leading-sleep script in a row does NOT (the model heard it, and is
+// sleeping anyway). Any script that does NOT lead with sleep clears the
+// flag, so the next time the model falls back to sleep-polling it is
+// reminded once more. The result is at most one nudge per sleep-poll
+// episode, which is the one attempt to redirect the signpost describes.
+//
+// APPENDED TO THE RESULT, because that is the only channel back to the
+// model — a tool returns text, and this text rides alongside whatever the
+// sleep produced. The error, if any, is untouched: the caller returns it
+// separately, so a timed-out sleep still reports its timeout.
+//
+// proven-by: TestSleepNudge_FiresOnALeadingSleep
+// proven-by: TestSleepNudge_DoesNotFireTwiceInARow
+// proven-by: TestSleepNudge_ResetsAfterANonSleepCommand
+// proven-by: TestSleepNudge_IgnoresAScriptWithNoLeadingSleep
+func sleepNudge(script, out string, nudged *bool) string {
+	if !leadingSleep(script) {
+		*nudged = false
+		return out
+	}
+	if *nudged {
+		return out
+	}
+	*nudged = true
+	const hint = "\n\n[shell] this script starts with `sleep` — if you are waiting for " +
+		"something to happen (a check to pass, a pod to be Ready), use local__wait with the " +
+		"command that succeeds when it has, rather than sleeping a guessed duration and polling. " +
+		"local__wait returns the instant the condition holds and tells you if it gives up."
+	return out + hint
 }
 
 // ScriptOf pulls the script out of a call's arguments, for a UI that has

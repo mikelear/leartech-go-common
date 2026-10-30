@@ -168,3 +168,59 @@ func TestBash_ATimeoutKillsTheScriptsChildrenToo(t *testing.T) {
 		t.Fatalf("took %s — the child kept the pipe open, so the timeout did not end the call", took)
 	}
 }
+
+// The description names the timeout, so a model reading the tool knows its
+// script will be killed — the thing a silent two-minute kill never told it.
+func TestBash_TheDescriptionNamesTheTimeout(t *testing.T) {
+	desc := Bash(t.TempDir(), 90*time.Second).Description
+	if !strings.Contains(desc, (90 * time.Second).String()) {
+		t.Errorf("description = %q, want it to name the timeout", desc)
+	}
+	if !strings.Contains(desc, "local__wait") {
+		t.Errorf("description = %q, want it to point at local__wait", desc)
+	}
+}
+
+// A script that leads with sleep gets a one-time pointer to local__wait,
+// appended to the result the model reads.
+func TestSleepNudge_FiresOnALeadingSleep(t *testing.T) {
+	nudged := new(bool)
+	out := sleepNudge("sleep 100; echo done", "done\n", nudged)
+	if !strings.Contains(out, "local__wait") {
+		t.Errorf("out = %q, want the nudge appended", out)
+	}
+	if !*nudged {
+		t.Error("the nudge did not record that it fired")
+	}
+}
+
+// It fires once, then stays quiet if the model sleeps again straight away —
+// at most one nudge per sleep-poll episode, not a nag on every call.
+func TestSleepNudge_DoesNotFireTwiceInARow(t *testing.T) {
+	nudged := new(bool)
+	_ = sleepNudge("sleep 100", "a", nudged)
+	second := sleepNudge("sleep 100", "b", nudged)
+	if strings.Contains(second, "local__wait") {
+		t.Errorf("second = %q, want no nudge on the back-to-back sleep", second)
+	}
+}
+
+// A non-sleep command in between resets it, so the next sleep is nudged
+// again — the model is reminded once per episode, not once per run.
+func TestSleepNudge_ResetsAfterANonSleepCommand(t *testing.T) {
+	nudged := new(bool)
+	_ = sleepNudge("sleep 100", "a", nudged)      // fires
+	_ = sleepNudge("ls", "files", nudged)         // resets
+	third := sleepNudge("sleep 100", "c", nudged) // fires again
+	if !strings.Contains(third, "local__wait") {
+		t.Errorf("third = %q, want the nudge after a reset", third)
+	}
+}
+
+func TestSleepNudge_IgnoresAScriptWithNoLeadingSleep(t *testing.T) {
+	nudged := new(bool)
+	out := sleepNudge("echo hi; sleep 1", "hi\n", nudged)
+	if strings.Contains(out, "local__wait") {
+		t.Errorf("out = %q, want no nudge when sleep is not first", out)
+	}
+}
