@@ -6,29 +6,27 @@ import (
 	"net/http"
 )
 
-// The handover is the conversational cousin of TransformSession.
+// This file is the client for the gateway's two-model handover endpoint, the
+// conversational cousin of TransformSession. The behaviour it describes is the
+// gateway's contract (proven in leartech-ai-gateway, internal/api/handover*);
+// this package only carries the wire shape to and from it.
 //
-// TransformSession rewrites a saved session's bytes for a new model and never
-// consults either model — it works when the checkpoint already holds everything
-// the target needs. A HANDOVER is for when it does not: a session that refers to
-// local files ("I wrote the summary to NOTES.md") carries the sentence but not
-// the file, so a bare transform leaves the target believing in context it cannot
-// read. The handover lets the two models DISCUSS the work — the target
-// summarises it back and names anything it is missing, the source confirms or
-// corrects — until the source agrees the target has a faithful grasp.
+// The contract, as the gateway documents it: where a transform rewrites a saved
+// session's bytes for a new model, a handover is intended for a session whose
+// context includes local files the checkpoint only NAMES — the two models hold a
+// bounded dialogue (target summarises, asks for any file it lacks, source
+// confirms or corrects) until agreement.
 //
-// THE FILE BOUNDARY, which the client is the reason for. The gateway never reads
-// the operator's disk. When the target asks for a file, the response is
-// PhaseNeedFiles with the paths; the CLER (the ship-proven shell / agent) reads
-// those files locally and calls SessionHandover again with their contents in
-// Files. The gateway stitches them into the dialogue. So a handover is a LOOP on
-// the caller's side: call, and while the phase is need_files, upload the named
-// files and call again — accumulating Files across calls — until the phase is
-// agreed (or cap_hit).
+// THE FILE BOUNDARY is why this method is shaped as one step of a caller-driven
+// loop rather than a single call. The intended use: call SessionHandover; while
+// Phase is HandoverPhaseNeedFiles, the caller (the ship-proven shell / agent)
+// supplies the named files in req.Files and calls again, accumulating across
+// calls, until Phase is agreed (or cap_hit). The loop lives on the caller
+// because reading local files is the caller's job, not this library's.
 //
-// AS RAW JSON for the same reason TransformSession is: this package does not
-// depend on agentloop, so the caller marshals its Checkpoint to json.RawMessage
-// and unmarshals the returned one back.
+// Checkpoints travel AS RAW JSON for the same reason TransformSession's do: this
+// package does not import agentloop, so the caller marshals its Checkpoint to
+// json.RawMessage and unmarshals the returned one back.
 
 // Handover phase constants mirror the gateway's. A caller branches on these
 // rather than comparing strings inline.
@@ -45,9 +43,10 @@ const (
 	HandoverPhaseCapHit = "cap_hit"
 )
 
-// HandoverFile is one local file the caller has uploaded because the target
-// asked for it on a previous call. The gateway replays it into the dialogue; the
-// bytes are read by the CALLER, never by the gateway.
+// HandoverFile is one local file the caller supplies in req.Files after a
+// need_files step. It is intended to carry a file the target named; the contents
+// are read by the caller before the call, so this type is just the path and the
+// text to send.
 type HandoverFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
@@ -90,8 +89,9 @@ type SessionHandoverResponse struct {
 	Checkpoint json.RawMessage `json:"checkpoint,omitempty"`
 	// TargetModel echoes what the session was handed TO.
 	TargetModel string `json:"target_model"`
-	// RequestedFiles names the local files the caller must upload and call back
-	// with, set only when Phase is need_files.
+	// RequestedFiles is the list of paths carried on a need_files step — the
+	// caller's cue for which files to supply in req.Files on the next call. Set
+	// only when Phase is need_files.
 	RequestedFiles []string `json:"requested_files,omitempty"`
 	// Handover is the audit trail of the dialogue so far.
 	Handover HandoverReport `json:"handover"`
