@@ -76,6 +76,12 @@ type SessionHandoverRequest struct {
 	// ReplyHeadroomTokens is passed through to the final transform, mirroring
 	// TransformSessionRequest.
 	ReplyHeadroomTokens int `json:"reply_headroom_tokens,omitempty"`
+
+	// Guidance is an OPTIONAL operator nudge the gateway shows to both models
+	// before the dialogue — extra context, not an override. The handover still
+	// summarises, requests files, corrects and agrees; this only pre-informs the
+	// models (e.g. "the source left handover notes in handover.md"). Empty = none.
+	Guidance string `json:"guidance,omitempty"`
 }
 
 // SessionHandoverResponse is one step of the handover: a settled session, a
