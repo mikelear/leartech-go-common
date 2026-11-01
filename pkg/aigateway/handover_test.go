@@ -36,12 +36,16 @@ func TestSessionHandover_PostsToTheEndpoint(t *testing.T) {
 			TargetModel: "claude",
 			SourceModel: "glm",
 			Checkpoint:  json.RawMessage(`{"version":1,"turn":2,"messages":[{"Role":"user","Content":"hi"}]}`),
+			Guidance:    "the source left notes in handover.md",
 		})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.TargetModel != "claude" || got.SourceModel != "glm" {
 		t.Fatalf("request reached the gateway wrong: %+v", got)
+	}
+	if got.Guidance != "the source left notes in handover.md" {
+		t.Errorf("guidance did not reach the gateway: %q", got.Guidance)
 	}
 	if resp.Phase != HandoverPhaseAgreed {
 		t.Fatalf("phase = %q, want agreed", resp.Phase)
