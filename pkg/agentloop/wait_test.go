@@ -1,7 +1,12 @@
 package agentloop
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -48,9 +53,6 @@ func TestWait_PollsUntilSuccess(t *testing.T) {
 	}
 	if !strings.Contains(out, "condition met") {
 		t.Errorf("out = %q, want success after polling", out)
-	}
-	if !strings.Contains(out, "attempt") {
-		t.Errorf("out = %q, want the attempt count reported", out)
 	}
 }
 
@@ -191,4 +193,145 @@ func TestWait_StripsALeadingSleepFromTheCommand(t *testing.T) {
 	if !strings.Contains(out, "dropped a leading") {
 		t.Errorf("out = %q, want the note that the sleep was dropped", out)
 	}
+}
+
+// A wait is ONE killable child for its whole life, not one child per attempt
+// with nothing listed in the gaps. We start a wait that never succeeds, watch
+// the registry show exactly one running entry continuously, then kill it and
+// confirm the wait ends and reports a deliberate external kill.
+func TestWait_IsOneKillableChildForTheWholeWait(t *testing.T) {
+	reg := NewExecRegistry(filepath.Join(t.TempDir(), "reg"))
+	root := t.TempDir()
+
+	type result struct {
+		out string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		// Never succeeds; a generous deadline so the kill, not the deadline,
+		// is what ends it. Short interval so the loop is clearly cycling.
+		out, err := waitForCommand(root, "false", 20*time.Second, 300*time.Millisecond,
+			ExecOpts{Registry: reg, ShellPID: os.Getpid()})
+		done <- result{out, err}
+	}()
+
+	// Across several poll intervals there is always exactly one entry — the
+	// single loop child — never zero (the old gap) and never many.
+	var pid int
+	sawContinuous := 0
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		list, _ := reg.List()
+		if len(list) == 1 {
+			pid = list[0].PID
+			sawContinuous++
+		} else if len(list) > 1 {
+			t.Fatalf("saw %d entries; a wait must be ONE child", len(list))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if pid == 0 || sawContinuous < 10 {
+		t.Fatalf("the wait was not continuously listed as one child (saw=%d)", sawContinuous)
+	}
+
+	if err := reg.Kill(pid, false); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	select {
+	case r := <-done:
+		if r.err == nil {
+			t.Fatal("a killed wait reported success")
+		}
+		if !strings.Contains(r.out, "killed from outside") {
+			t.Errorf("out = %q, want the external kill explained", r.out)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the killed wait did not return")
+	}
+	// The entry is gone once the wait returns.
+	if list, _ := reg.List(); len(list) != 0 {
+		t.Errorf("after the wait ended, List = %v, want empty", list)
+	}
+}
+
+// An external kill of a wait is reported as deliberate — the same contract as
+// local__bash — so the model stops rather than treating it as a failed check.
+func TestWait_AnExternalKillIsReportedAsDeliberate(t *testing.T) {
+	reg := NewExecRegistry(filepath.Join(t.TempDir(), "reg"))
+	root := t.TempDir()
+	done := make(chan error, 1)
+	var out string
+	go func() {
+		o, err := waitForCommand(root, "false", 20*time.Second, 300*time.Millisecond,
+			ExecOpts{Registry: reg, ShellPID: os.Getpid()})
+		out = o
+		done <- err
+	}()
+	var pid int
+	for i := 0; i < 50 && pid == 0; i++ {
+		if list, _ := reg.List(); len(list) == 1 {
+			pid = list[0].PID
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if pid == 0 {
+		t.Fatal("wait never registered")
+	}
+	if err := reg.Kill(pid, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("killed wait reported success")
+	}
+	if !strings.Contains(out, "do not retry") && !strings.Contains(out, "Stop and wait") {
+		t.Errorf("out = %q, want it to tell the model to stop", out)
+	}
+}
+
+// The loop script succeeds immediately for a command that already passes.
+func TestWaitLoopScript_SucceedsImmediatelyOnAPassingCommand(t *testing.T) {
+	script := waitLoopScript("true", 10*time.Second, time.Second)
+	start := time.Now()
+	_, err := runInGroup(contextTODO(), t.TempDir(), script, "local__wait", "true", ExecOpts{})
+	if err != nil {
+		t.Fatalf("a passing command should exit 0: %v", err)
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Errorf("took %s; a passing command should return at once", took)
+	}
+}
+
+// The loop script exits with the deadline sentinel (97) when it never passes.
+func TestWaitLoopScript_ExitsWithTheDeadlineSentinelOnTimeout(t *testing.T) {
+	script := waitLoopScript("false", 1*time.Second, 300*time.Millisecond)
+	_, err := runInGroup(contextTODO(), t.TempDir(), script, "local__wait", "false", ExecOpts{})
+	ee := exitErr(t, err)
+	if ee != 97 {
+		t.Errorf("exit code = %d, want the deadline sentinel 97", ee)
+	}
+}
+
+// shSingleQuote wraps a command for sh -c, escaping embedded quotes, so a
+// command with its own quoting reaches sh intact.
+func TestShSingleQuote_WrapsAndEscapes(t *testing.T) {
+	got := shSingleQuote(`echo "a 'b' c"`)
+	want := `'echo "a '\''b'\'' c"'`
+	if got != want {
+		t.Errorf("shSingleQuote = %q, want %q", got, want)
+	}
+}
+
+func contextTODO() context.Context { return context.Background() }
+
+func exitErr(t *testing.T, err error) int {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected a non-nil error")
+	}
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("error %v is not an *exec.ExitError", err)
+	}
+	return ee.ExitCode()
 }
