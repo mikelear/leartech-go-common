@@ -13,7 +13,7 @@ import (
 // A nil registry (built from "") is a no-op on every method, so a caller
 // without a registry dir passes nil and the tools behave as before.
 func TestExecRegistry_NilIsANoOp(t *testing.T) {
-	var r *ExecRegistry = NewExecRegistry("")
+	r := NewExecRegistry("")
 	if r != nil {
 		t.Fatalf("NewExecRegistry(\"\") = %v, want nil", r)
 	}
