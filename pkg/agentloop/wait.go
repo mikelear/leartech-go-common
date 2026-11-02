@@ -133,11 +133,27 @@ func WaitIn(root string, timeout time.Duration, opts ExecOpts) Tool {
 
 // waitForCommand polls command until it exits 0 or the deadline passes.
 //
-// THE DEADLINE IS THE WHOLE RUN, NOT EACH ATTEMPT. A single attempt that
-// hangs does not outlast the wait: its children are killed the same way
-// local__bash kills its own, and the overall context bounds the loop so a
-// command that keeps failing still returns at the ceiling rather than
-// running forever. // proven-by: TestWait_GivesUpAtTheDeadlineAndSaysSo
+// ONE CHILD FOR THE WHOLE WAIT, NOT ONE PER ATTEMPT. The poll loop — run the
+// command, and if it fails sleep the interval and run it again until success
+// or the deadline — is itself a shell script run as a SINGLE child process
+// (see waitLoopScript). That is what makes a wait killable from another
+// terminal: it is ONE process, in the ExecRegistry for the WHOLE wait (not
+// just during an attempt, with nothing listed during the 5s gaps), and
+// `ship-proven exec kill` of that one pid ends the whole wait. The earlier
+// design polled with one child per attempt and did the sleeping in Go, so for
+// most of the wait there was no process to list or kill — the defect this
+// fixes.
+//
+// THE OUTCOME IS READ FROM THE CHILD'S EXIT. The loop exits 0 the instant the
+// command succeeds, 97 when it reaches the deadline (a sentinel distinct from
+// any ordinary exit code), and is killed-by-signal when stopped from outside —
+// the same three cases the caller already tells apart, now for the loop rather
+// than a single attempt.
+//
+// proven-by: TestWait_ReturnsWhenTheCommandSucceeds
+// proven-by: TestWait_PollsUntilSuccess
+// proven-by: TestWait_GivesUpAtTheDeadlineAndSaysSo
+// proven-by: TestWait_IsOneKillableChildForTheWholeWait
 func waitForCommand(root, command string, timeout, interval time.Duration, opts ExecOpts) (string, error) {
 	dir, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -145,39 +161,86 @@ func waitForCommand(root, command string, timeout, interval time.Duration, opts 
 	}
 
 	deadline := time.Now().Add(timeout)
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	// The whole loop runs under one timeout, with a small grace so the script
+	// reaches its own deadline branch (exit 97) and prints the last attempt's
+	// output before the context would hard-kill it.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+2*time.Second)
 	defer cancel()
 
-	attempts := 0
-	var lastOut string
-	for {
-		attempts++
-		out, ok := runOnce(ctx, dir, command, opts)
-		lastOut = out
-		if ok {
-			var b bytes.Buffer
-			if s := strings.TrimRight(out, "\n"); s != "" {
-				b.WriteString(s)
-				b.WriteString("\n\n")
-			}
-			fmt.Fprintf(&b, "condition met after %s (%d attempt(s))",
-				waitElapsed(timeout, deadline), attempts)
-			return b.String(), nil
-		}
-
-		// No point sleeping if the next attempt could not finish before the
-		// deadline anyway — report the give-up now rather than after a sleep.
-		if time.Until(deadline) <= interval {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			// The deadline passed while the attempt was running.
-			return giveUp(lastOut, timeout, attempts), fmt.Errorf("gave up after %s", timeout)
-		case <-time.After(interval):
-		}
+	script := waitLoopScript(command, timeout, interval)
+	out, runErr := runInGroup(ctx, dir, script, "local__wait", scriptSummary(command), opts)
+	if len(out) > maxExecOutput {
+		out = out[:maxExecOutput] + fmt.Sprintf("\n\n(output cut at %d bytes; there was more)", maxExecOutput)
 	}
-	return giveUp(lastOut, timeout, attempts), fmt.Errorf("gave up after %s", timeout)
+
+	// Killed from outside: the whole wait was stopped by `ship-proven exec
+	// kill`. Reported as deliberate, exactly as local__bash does, so the model
+	// stops rather than treating it as a failed check. // proven-by: TestWait_AnExternalKillIsReportedAsDeliberate
+	if sig, ok := killedBySignal(runErr); ok {
+		var b bytes.Buffer
+		if s := strings.TrimRight(out, "\n"); s != "" {
+			b.WriteString(s)
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "this wait was killed from outside (signal: %s) — a person "+
+			"stopped it with `ship-proven exec kill`. This is NOT a failed check; do "+
+			"not retry or work around it. Stop and wait for them to tell you why.", sig)
+		return b.String(), fmt.Errorf("killed from outside (signal: %s)", sig)
+	}
+
+	if runErr == nil {
+		// The loop exited 0: the command succeeded.
+		var b bytes.Buffer
+		if s := strings.TrimRight(out, "\n"); s != "" {
+			b.WriteString(s)
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "condition met after %s", waitElapsed(timeout, deadline))
+		return b.String(), nil
+	}
+
+	// Any non-zero exit (the deadline sentinel 97, or the context's own kill)
+	// is a give-up: the condition did not hold in time.
+	return giveUp(out, timeout), fmt.Errorf("gave up after %s", timeout)
+}
+
+// waitLoopScript builds the shell poll loop that IS the wait: run the user's
+// command, and while it fails, sleep the interval and run it again, until it
+// succeeds (exit 0) or the deadline passes (exit 97).
+//
+// POSIX sh, no bashisms, so it runs under the same /bin/sh every tool uses.
+// The user command is embedded verbatim (the caller already stripped a leading
+// sleep and gated the whole thing through Registry.Run), run with `sh -c` so a
+// pipeline or && chain behaves as written.
+//
+// proven-by: TestWaitLoopScript_SucceedsImmediatelyOnAPassingCommand
+// proven-by: TestWaitLoopScript_ExitsWithTheDeadlineSentinelOnTimeout
+func waitLoopScript(command string, timeout, interval time.Duration) string {
+	secs := int(timeout.Seconds())
+	if secs < 1 {
+		secs = 1
+	}
+	ivl := int(interval.Seconds())
+	if ivl < 1 {
+		ivl = 1
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "__end=$(( $(date +%%s) + %d ))\n", secs)
+	b.WriteString("while :; do\n")
+	b.WriteString("  if sh -c " + shSingleQuote(command) + "; then exit 0; fi\n")
+	b.WriteString("  if [ \"$(date +%s)\" -ge \"$__end\" ]; then exit 97; fi\n")
+	fmt.Fprintf(&b, "  sleep %d\n", ivl)
+	b.WriteString("done\n")
+	return b.String()
+}
+
+// shSingleQuote wraps a string in single quotes for POSIX sh, escaping any
+// embedded single quotes, so the user's command is passed to `sh -c` exactly
+// as written however it is quoted.
+//
+// proven-by: TestShSingleQuote_WrapsAndEscapes
+func shSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // waitElapsed renders how long the wait took, rounded to the second.
@@ -195,30 +258,15 @@ func waitElapsed(timeout time.Duration, deadline time.Time) time.Duration {
 // fixes: a wait that gives up tells the model it waited the full window and
 // the condition still did not hold, so the model's next move is to
 // investigate rather than to assume the check passed.
-func giveUp(lastOut string, timeout time.Duration, attempts int) string {
+func giveUp(lastOut string, timeout time.Duration) string {
 	var b bytes.Buffer
 	if s := strings.TrimRight(lastOut, "\n"); s != "" {
 		b.WriteString(s)
 		b.WriteString("\n\n")
 	}
-	fmt.Fprintf(&b, "the condition did not hold within %s (%d attempt(s)); "+
-		"the last attempt's output is above. The wait gave up — this is NOT a "+
-		"passing result.", timeout, attempts)
+	fmt.Fprintf(&b, "the condition did not hold within %s; the last attempt's "+
+		"output is above. The wait gave up — this is NOT a passing result.", timeout)
 	return b.String()
-}
-
-// runOnce runs the command once, killing its process group on cancellation
-// exactly as runScript does, and reports whether it exited 0.
-func runOnce(ctx context.Context, dir, command string, opts ExecOpts) (string, bool) {
-	// Same spawn-in-its-own-group path as local__bash (see runInGroup), so a
-	// hung attempt's children are killed and the attempt is announced to the
-	// ExecRegistry for its lifetime — a long wait is visible to `exec list`
-	// and killable with `exec kill` exactly like a bash run.
-	body, runErr := runInGroup(ctx, dir, command, "local__wait", scriptSummary(command), opts)
-	if len(body) > maxExecOutput {
-		body = body[:maxExecOutput] + fmt.Sprintf("\n\n(output cut at %d bytes; there was more)", maxExecOutput)
-	}
-	return body, runErr == nil
 }
 
 // stripLeadingSleep removes a pointless `sleep N;` from the FRONT of a wait
