@@ -40,9 +40,9 @@ func TestWait_PollsUntilSuccess(t *testing.T) {
 	script := "test -f " + root + "/ready"
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		_, _ = waitForCommand(root, "touch "+root+"/ready", time.Minute, time.Second)
+		_, _ = waitForCommand(root, "touch "+root+"/ready", time.Minute, time.Second, ExecOpts{})
 	}()
-	out, err := waitForCommand(root, script, 10*time.Second, 200*time.Millisecond)
+	out, err := waitForCommand(root, script, 10*time.Second, 200*time.Millisecond, ExecOpts{})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestWait_PollsUntilSuccess(t *testing.T) {
 // When the deadline passes it gives up, says so, and does NOT look like a pass.
 func TestWait_GivesUpAtTheDeadlineAndSaysSo(t *testing.T) {
 	start := time.Now()
-	out, err := waitForCommand(t.TempDir(), "false", 600*time.Millisecond, 200*time.Millisecond)
+	out, err := waitForCommand(t.TempDir(), "false", 600*time.Millisecond, 200*time.Millisecond, ExecOpts{})
 	if err == nil {
 		t.Fatal("a wait that never succeeded was reported as success")
 	}
@@ -72,7 +72,7 @@ func TestWait_GivesUpAtTheDeadlineAndSaysSo(t *testing.T) {
 // The deadline is named in the give-up text, so the model reasons on the
 // real window rather than a guess.
 func TestWait_ReportsTheDeadlineInTheResult(t *testing.T) {
-	out, _ := waitForCommand(t.TempDir(), "false", 500*time.Millisecond, 200*time.Millisecond)
+	out, _ := waitForCommand(t.TempDir(), "false", 500*time.Millisecond, 200*time.Millisecond, ExecOpts{})
 	if !strings.Contains(out, "500ms") {
 		t.Errorf("out = %q, want the deadline named", out)
 	}

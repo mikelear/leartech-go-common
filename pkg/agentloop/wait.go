@@ -6,12 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -69,6 +66,16 @@ const defaultWaitInterval = 5 * time.Second
 // proven-by: TestWait_AnEmptyCommandIsRefused
 // proven-by: TestWait_DeclaresItselfAsExecuting
 func Wait(root string, timeout time.Duration) Tool {
+	return WaitIn(root, timeout, ExecOpts{})
+}
+
+// WaitIn is Wait with the extra context a running wait announces to the
+// ExecRegistry, so a second terminal can `ship-proven exec list` / `exec kill`
+// it. Wait is WaitIn with an empty ExecOpts, leaving every existing caller and
+// test untouched.
+//
+// proven-by: TestWaitIn_AnnouncesEachAttemptToTheRegistry
+func WaitIn(root string, timeout time.Duration, opts ExecOpts) Tool {
 	if timeout <= 0 {
 		timeout = DefaultWaitTimeout
 	}
@@ -115,7 +122,7 @@ func Wait(root string, timeout time.Duration) Tool {
 				return "", errors.New("command is required")
 			}
 			cmd, note := stripLeadingSleep(in.Command)
-			out, err := waitForCommand(root, cmd, timeout, defaultWaitInterval)
+			out, err := waitForCommand(root, cmd, timeout, defaultWaitInterval, opts)
 			if note != "" {
 				out = note + "\n\n" + out
 			}
@@ -131,7 +138,7 @@ func Wait(root string, timeout time.Duration) Tool {
 // local__bash kills its own, and the overall context bounds the loop so a
 // command that keeps failing still returns at the ceiling rather than
 // running forever. // proven-by: TestWait_GivesUpAtTheDeadlineAndSaysSo
-func waitForCommand(root, command string, timeout, interval time.Duration) (string, error) {
+func waitForCommand(root, command string, timeout, interval time.Duration, opts ExecOpts) (string, error) {
 	dir, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", fmt.Errorf("working directory is unreadable: %w", err)
@@ -145,7 +152,7 @@ func waitForCommand(root, command string, timeout, interval time.Duration) (stri
 	var lastOut string
 	for {
 		attempts++
-		out, ok := runOnce(ctx, dir, command)
+		out, ok := runOnce(ctx, dir, command, opts)
 		lastOut = out
 		if ok {
 			var b bytes.Buffer
@@ -202,26 +209,12 @@ func giveUp(lastOut string, timeout time.Duration, attempts int) string {
 
 // runOnce runs the command once, killing its process group on cancellation
 // exactly as runScript does, and reports whether it exited 0.
-func runOnce(ctx context.Context, dir, command string) (string, bool) {
-	cmd := exec.CommandContext(ctx, "sh") // #nosec G204 -- an approved command, gated by Registry.Run
-	cmd.Dir = dir
-	cmd.Stdin = bytes.NewReader([]byte(command))
-	cmd.Env = os.Environ()
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	cmd.WaitDelay = 2 * time.Second
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	runErr := cmd.Run()
-
-	body := out.String()
+func runOnce(ctx context.Context, dir, command string, opts ExecOpts) (string, bool) {
+	// Same spawn-in-its-own-group path as local__bash (see runInGroup), so a
+	// hung attempt's children are killed and the attempt is announced to the
+	// ExecRegistry for its lifetime — a long wait is visible to `exec list`
+	// and killable with `exec kill` exactly like a bash run.
+	body, runErr := runInGroup(ctx, dir, command, "local__wait", scriptSummary(command), opts)
 	if len(body) > maxExecOutput {
 		body = body[:maxExecOutput] + fmt.Sprintf("\n\n(output cut at %d bytes; there was more)", maxExecOutput)
 	}

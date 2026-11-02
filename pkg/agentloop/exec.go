@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"time"
 )
 
@@ -53,6 +51,16 @@ const maxExecOutput = 64 * 1024
 // proven-by: TestBash_AnEmptyScriptIsRefused
 // proven-by: TestBash_TheDescriptionNamesTheTimeout
 func Bash(root string, timeout time.Duration) Tool {
+	return BashIn(root, timeout, ExecOpts{})
+}
+
+// BashIn is Bash with the extra context a running script announces to the
+// ExecRegistry, so a person at a SECOND terminal can `ship-proven exec list`
+// it and `ship-proven exec kill` it. Bash is BashIn with an empty ExecOpts
+// (no registry), which is why every existing caller and test is untouched.
+//
+// proven-by: TestBashIn_AnnouncesTheRunToTheRegistry
+func BashIn(root string, timeout time.Duration, opts ExecOpts) Tool {
 	if timeout <= 0 {
 		timeout = DefaultExecTimeout
 	}
@@ -90,7 +98,7 @@ func Bash(root string, timeout time.Duration) Tool {
 			if in.Script == "" {
 				return "", errors.New("script is required")
 			}
-			out, err := runScript(root, in.Script, timeout)
+			out, err := runScript(root, in.Script, timeout, opts)
 			return sleepNudge(in.Script, out, nudged), err
 		},
 	}
@@ -152,7 +160,7 @@ func ScriptOf(args json.RawMessage) string {
 	return in.Script
 }
 
-func runScript(root, script string, timeout time.Duration) (string, error) {
+func runScript(root, script string, timeout time.Duration, opts ExecOpts) (string, error) {
 	dir, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", fmt.Errorf("working directory is unreadable: %w", err)
@@ -161,42 +169,12 @@ func runScript(root, script string, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Passed on stdin rather than as -c, so a script containing quotes,
-	// newlines or a NUL-adjacent oddity arrives exactly as approved. The
-	// bytes that run are the bytes that were shown.
-	cmd := exec.CommandContext(ctx, "sh") // #nosec G204 -- an approved script, gated by Registry.Run
-	cmd.Dir = dir
-	cmd.Stdin = bytes.NewReader([]byte(script))
-	cmd.Env = os.Environ()
+	// runInGroup spawns sh in its own process group, announces the run to the
+	// ExecRegistry for its lifetime (so a second terminal can list and kill
+	// it), and kills the whole group on the timeout — the behaviour measured
+	// to stop a surviving child from hanging the call. See execrun.go.
+	body, runErr := runInGroup(ctx, dir, script, "local__bash", scriptSummary(script), opts)
 
-	// THE TIMEOUT KILLS THE WHOLE PROCESS GROUP, NOT JUST sh.
-	//
-	// Measured: `sleep 30` with a 300ms timeout took the full 30 seconds.
-	// CommandContext kills the shell, but the shell's children survive,
-	// inherit the output pipe, and Run blocks until the last writer
-	// closes it — the hang the timeout was added to prevent. // proven-by: TestBash_ATimeoutKillsTheScriptsChildrenToo
-	//
-	// Setpgid puts the script in its own group so the whole tree can be
-	// killed; WaitDelay is the backstop for anything that survives even
-	// that, forcing the pipes shut rather than waiting forever.
-	//
-	// proven-by: TestBash_ATimeoutIsReportedNotHung
-	// proven-by: TestBash_ATimeoutKillsTheScriptsChildrenToo
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	cmd.WaitDelay = 2 * time.Second
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	runErr := cmd.Run()
-
-	body := out.String()
 	truncated := false
 	if len(body) > maxExecOutput {
 		body, truncated = body[:maxExecOutput], true
@@ -213,6 +191,18 @@ func runScript(root, script string, timeout time.Duration) (string, error) {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		fmt.Fprintf(&b, "\n\nthe script was killed after %s", timeout)
 		return b.String(), fmt.Errorf("timed out after %s", timeout)
+	}
+	if sig, ok := killedBySignal(runErr); ok {
+		// KILLED FROM OUTSIDE, NOT A FAILURE OF ITS OWN. A person at another
+		// terminal ran `ship-proven exec kill` and this is the result. Said
+		// plainly so the model does NOT read it as a bug in its script and
+		// rush to "fix" it — the right next move is to STOP and wait for the
+		// person to say why they killed it. // proven-by: TestBash_AnExternalKillIsReportedAsDeliberate
+		fmt.Fprintf(&b, "\n\nthis script was killed from outside (signal: %s) — "+
+			"a person stopped it with `ship-proven exec kill`. This is NOT a fault "+
+			"in the script; do not retry or work around it. Stop and wait for them "+
+			"to tell you why.", sig)
+		return b.String(), fmt.Errorf("killed from outside (signal: %s)", sig)
 	}
 	if runErr != nil {
 		// THE OUTPUT COMES BACK WITH THE FAILURE. A non-zero exit whose
