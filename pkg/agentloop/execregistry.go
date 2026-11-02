@@ -70,6 +70,17 @@ func NewExecRegistry(dir string) *ExecRegistry {
 	return &ExecRegistry{dir: dir}
 }
 
+// Record announces a running exec and returns a cleanup that removes it. It is
+// the exported seam the SHELL uses nowhere (the tools call the internal path)
+// and that TESTS in other packages use to seed the registry with a known
+// entry. In-process callers get the same write-then-remove contract as the
+// tools' own announcements.
+//
+// proven-by: TestExecRegistry_RecordsWhileRunningAndRemovesAfter
+func (r *ExecRegistry) Record(e Entry) func() {
+	return r.record(e)
+}
+
 // record writes the entry for a running script and returns a function that
 // removes it. The caller defers the returned func, so the entry exists for
 // exactly the life of the run — written before Run, gone after it, whether
@@ -83,17 +94,6 @@ func NewExecRegistry(dir string) *ExecRegistry {
 //
 // proven-by: TestExecRegistry_RecordsWhileRunningAndRemovesAfter
 // proven-by: TestExecRegistry_AnUnwritableDirDoesNotBreakTheRun
-// Record announces a running exec and returns a cleanup that removes it. It is
-// the exported seam the SHELL uses nowhere (the tools call the internal path)
-// and that TESTS in other packages use to seed the registry with a known
-// entry. In-process callers get the same write-then-remove contract as the
-// tools' own announcements.
-//
-// proven-by: TestExecRegistry_RecordsWhileRunningAndRemovesAfter
-func (r *ExecRegistry) Record(e Entry) func() {
-	return r.record(e)
-}
-
 func (r *ExecRegistry) record(e Entry) func() {
 	if r == nil {
 		return func() {}
