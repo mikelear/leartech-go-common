@@ -224,3 +224,68 @@ func TestSleepNudge_IgnoresAScriptWithNoLeadingSleep(t *testing.T) {
 		t.Errorf("out = %q, want no nudge when sleep is not first", out)
 	}
 }
+
+// clampExecTimeout: zero means no override, the default is used untouched.
+func TestClampExecTimeout_ZeroUsesTheDefault(t *testing.T) {
+	eff, note := clampExecTimeout(0, 90*time.Second)
+	if eff != 90*time.Second || note != "" {
+		t.Fatalf("got (%s,%q), want (1m30s,\"\")", eff, note)
+	}
+}
+
+// clampExecTimeout: a positive value is seconds and is used as-is.
+func TestClampExecTimeout_UsesAPositiveOverride(t *testing.T) {
+	eff, note := clampExecTimeout(300, 2*time.Minute)
+	if eff != 300*time.Second || note != "" {
+		t.Fatalf("got (%s,%q), want (5m0s,\"\")", eff, note)
+	}
+}
+
+// clampExecTimeout: above the ceiling is clamped down and said so.
+func TestClampExecTimeout_ClampsAboveTheCeilingAndSaysSo(t *testing.T) {
+	eff, note := clampExecTimeout(int(MaxExecTimeout.Seconds())+600, 2*time.Minute)
+	if eff != MaxExecTimeout {
+		t.Errorf("effective = %s, want the ceiling %s", eff, MaxExecTimeout)
+	}
+	if !strings.Contains(note, "clamped to") {
+		t.Errorf("note = %q, want it to explain the clamp", note)
+	}
+}
+
+// local__bash honours a per-call timeout_seconds override: a command that
+// outlasts the small DEFAULT but finishes within the OVERRIDE succeeds.
+func TestBash_HonoursATimeoutOverride(t *testing.T) {
+	args, _ := json.Marshal(map[string]any{"script": "sleep 1; echo done", "timeout_seconds": 20})
+	// Default here is a sub-second ceiling; without the override this would be killed.
+	out, err := Bash(t.TempDir(), 300*time.Millisecond).Run(args)
+	if err != nil {
+		t.Fatalf("the override should let a 1s command finish: %v (out=%q)", err, out)
+	}
+	if !strings.Contains(out, "done") {
+		t.Errorf("out = %q, want the command's output", out)
+	}
+}
+
+// local__bash clamps an over-the-ceiling override and tells the model it did.
+func TestBash_ClampsAnOverTheCeilingTimeout(t *testing.T) {
+	args, _ := json.Marshal(map[string]any{"script": "true", "timeout_seconds": int(MaxExecTimeout.Seconds()) + 600})
+	out, err := Bash(t.TempDir(), 2*time.Minute).Run(args)
+	if err != nil {
+		t.Fatalf("a passing command should succeed: %v", err)
+	}
+	if !strings.Contains(out, "clamped to") {
+		t.Errorf("out = %q, want the clamp explained", out)
+	}
+}
+
+// The description names the override and its cap, so a model with a long
+// command knows it can ask for more time rather than watching it get killed.
+func TestBash_TheDescriptionNamesTheOverride(t *testing.T) {
+	desc := Bash(t.TempDir(), 2*time.Minute).Description
+	if !strings.Contains(desc, "timeout_seconds") {
+		t.Errorf("description = %q, want it to name the override", desc)
+	}
+	if !strings.Contains(desc, MaxExecTimeout.String()) {
+		t.Errorf("description = %q, want it to name the cap", desc)
+	}
+}
