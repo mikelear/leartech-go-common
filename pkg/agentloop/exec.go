@@ -18,6 +18,18 @@ import (
 // In the transcript that reads the same as a crash. // proven-by: TestBash_ATimeoutIsReportedNotHung
 const DefaultExecTimeout = 2 * time.Minute
 
+// MaxExecTimeout is the hard ceiling an override to local__bash may ask for.
+//
+// A PER-CALL OVERRIDE, BOUNDED — the mirror of MaxWaitTimeout. The two-minute
+// default is right for the common command and wrong for the rare long one: a
+// big `git clone`, a `go test ./...` on a large module, a `docker build`.
+// Those are legitimately slow and are NOT the hung-run the default guards
+// against, so the model may ask for more time for one script. The ceiling is
+// here so the override does not disable the guard entirely — the whole reason
+// bash has a timeout at all is to stop a truly hung command hanging the run
+// forever. // proven-by: TestBash_ClampsAnOverTheCeilingTimeout
+const MaxExecTimeout = 30 * time.Minute
+
 // maxExecOutput bounds what comes back.
 //
 // The output goes into the next prompt and is paid for by the token, so a
@@ -75,11 +87,15 @@ func BashIn(root string, timeout time.Duration, opts ExecOpts) Tool {
 		Description: fmt.Sprintf("Run a shell script in the working directory. The whole "+
 			"script is shown to the operator for approval before it runs, so "+
 			"write it to be read: one purpose, no surprises. A script is killed "+
-			"after %s; to wait for something to happen, use local__wait rather "+
-			"than `sleep`.", timeout),
+			"after %s by default; to wait for something to happen, use local__wait "+
+			"rather than `sleep`. Pass timeout_seconds to raise that ceiling for one "+
+			"genuinely long command (a big clone, a full test run) — capped at %s.", timeout, MaxExecTimeout),
 		Schema: json.RawMessage(`{
 		  "type":"object",
-		  "properties":{"script":{"type":"string","description":"the shell script to run"}},
+		  "properties":{
+		    "script":{"type":"string","description":"the shell script to run"},
+		    "timeout_seconds":{"type":"integer","description":"optional: raise the kill-after ceiling (seconds) for one genuinely long command such as a big clone or a full test run. Clamped to a hard maximum. Omit for the default."}
+		  },
 		  "required":["script"]
 		}`),
 		Preview: func(args json.RawMessage) string {
@@ -90,7 +106,8 @@ func BashIn(root string, timeout time.Duration, opts ExecOpts) Tool {
 		},
 		Run: func(args json.RawMessage) (string, error) {
 			var in struct {
-				Script string `json:"script"`
+				Script         string `json:"script"`
+				TimeoutSeconds int    `json:"timeout_seconds"`
 			}
 			if err := json.Unmarshal(args, &in); err != nil {
 				return "", fmt.Errorf("arguments are not valid JSON: %w", err)
@@ -98,8 +115,16 @@ func BashIn(root string, timeout time.Duration, opts ExecOpts) Tool {
 			if in.Script == "" {
 				return "", errors.New("script is required")
 			}
-			out, err := runScript(root, in.Script, timeout, opts)
-			return sleepNudge(in.Script, out, nudged), err
+			// An optional per-call override of the kill-after ceiling, clamped so a
+			// long command can be allowed without disabling the guard that keeps a
+			// hung one from hanging the run. clampExecTimeout returns any note.
+			effective, clampNote := clampExecTimeout(in.TimeoutSeconds, timeout)
+			out, err := runScript(root, in.Script, effective, opts)
+			out = sleepNudge(in.Script, out, nudged)
+			if clampNote != "" {
+				out = clampNote + "\n\n" + out
+			}
+			return out, err
 		},
 	}
 }
@@ -158,6 +183,33 @@ func ScriptOf(args json.RawMessage) string {
 		return ""
 	}
 	return in.Script
+}
+
+// clampExecTimeout resolves the kill-after ceiling for one local__bash call
+// from an optional per-call override, and returns a note when it changed what
+// was asked.
+//
+// The mirror of clampWaitTimeout: zero or negative means "no override" and the
+// built-in default is used with no note; a positive value is seconds and is
+// used as-is; anything above MaxExecTimeout is clamped down to the ceiling with
+// a note, so the model is not left reasoning on a longer deadline than the
+// one that ran.
+//
+// proven-by: TestClampExecTimeout_ZeroUsesTheDefault
+// proven-by: TestClampExecTimeout_UsesAPositiveOverride
+// proven-by: TestClampExecTimeout_ClampsAboveTheCeilingAndSaysSo
+// proven-by: TestBash_HonoursATimeoutOverride
+// proven-by: TestBash_ClampsAnOverTheCeilingTimeout
+func clampExecTimeout(seconds int, def time.Duration) (effective time.Duration, note string) {
+	if seconds <= 0 {
+		return def, ""
+	}
+	want := time.Duration(seconds) * time.Second
+	if want > MaxExecTimeout {
+		return MaxExecTimeout, fmt.Sprintf("[shell] requested timeout %s exceeds the maximum %s; "+
+			"clamped to %s.", want, MaxExecTimeout, MaxExecTimeout)
+	}
+	return want, ""
 }
 
 func runScript(root, script string, timeout time.Duration, opts ExecOpts) (string, error) {

@@ -335,3 +335,102 @@ func exitErr(t *testing.T, err error) int {
 	}
 	return ee.ExitCode()
 }
+
+// THE REGRESSION THIS BRANCH FIXES. A wait that reaches its OWN deadline is
+// ended by the outer context's SIGKILL, which is a signalled death. Before the
+// fix that was read by killedBySignal as a person running `ship-proven exec
+// kill`, so a plain timeout reported itself as a deliberate external kill and
+// told the model to stop and wait for a human who was never there. The loop
+// interval here is far longer than the deadline, so the script is mid-`sleep`
+// when the context fires and cannot reach its own exit-97 branch — the exact
+// shape that triggered the false "user killed it" in a live session.
+//
+// proven-by is this test; it must report a give-up, never an external kill.
+func TestWait_AnOwnDeadlineIsNotReportedAsAnExternalKill(t *testing.T) {
+	reg := NewExecRegistry(filepath.Join(t.TempDir(), "reg"))
+	out, err := waitForCommand(t.TempDir(), "false", 1*time.Second, 30*time.Second,
+		ExecOpts{Registry: reg, ShellPID: os.Getpid()})
+	if err == nil {
+		t.Fatal("a wait that never passes must return an error")
+	}
+	if strings.Contains(out, "killed from outside") {
+		t.Fatalf("own deadline reported as an external kill:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "gave up after") {
+		t.Errorf("err = %v, want a give-up", err)
+	}
+	if !strings.Contains(out, "did not hold within") {
+		t.Errorf("out = %q, want the deadline said out loud", out)
+	}
+}
+
+// clampWaitTimeout: zero means no override, so the default is used untouched.
+func TestClampWaitTimeout_ZeroUsesTheDefault(t *testing.T) {
+	eff, note := clampWaitTimeout(0, 7*time.Minute)
+	if eff != 7*time.Minute || note != "" {
+		t.Fatalf("got (%s,%q), want (7m0s,\"\")", eff, note)
+	}
+}
+
+// clampWaitTimeout: a positive value is taken as seconds and used as-is.
+func TestClampWaitTimeout_UsesAPositiveOverride(t *testing.T) {
+	eff, note := clampWaitTimeout(90, 15*time.Minute)
+	if eff != 90*time.Second || note != "" {
+		t.Fatalf("got (%s,%q), want (1m30s,\"\")", eff, note)
+	}
+}
+
+// clampWaitTimeout: anything above the ceiling is clamped down and said so.
+func TestClampWaitTimeout_ClampsAboveTheCeilingAndSaysSo(t *testing.T) {
+	eff, note := clampWaitTimeout(int(MaxWaitTimeout.Seconds())+600, 15*time.Minute)
+	if eff != MaxWaitTimeout {
+		t.Errorf("effective = %s, want the ceiling %s", eff, MaxWaitTimeout)
+	}
+	if !strings.Contains(note, "clamped to") {
+		t.Errorf("note = %q, want it to explain the clamp", note)
+	}
+}
+
+// local__wait honours a per-call timeout_seconds override: a 1-second override
+// on a never-passing command gives up in about a second, not the default.
+func TestWait_HonoursATimeoutOverride(t *testing.T) {
+	args, _ := json.Marshal(map[string]any{"command": "false", "timeout_seconds": 1})
+	start := time.Now()
+	out, err := Wait(t.TempDir(), DefaultWaitTimeout).Run(args)
+	took := time.Since(start)
+	if err == nil {
+		t.Fatal("a never-passing command must give up")
+	}
+	if took > 6*time.Second {
+		t.Errorf("took %s; a 1s override should give up quickly, not wait the default", took)
+	}
+	if strings.Contains(out, "killed from outside") {
+		t.Errorf("an override give-up must not read as an external kill:\n%s", out)
+	}
+}
+
+// local__wait clamps an over-the-ceiling override and tells the model it did,
+// so the model does not reason on a deadline that was never used.
+func TestWait_ClampsAnOverTheCeilingTimeout(t *testing.T) {
+	// A passing command returns at once; we only check the clamp note rides along.
+	args, _ := json.Marshal(map[string]any{"command": "true", "timeout_seconds": int(MaxWaitTimeout.Seconds()) + 600})
+	out, err := Wait(t.TempDir(), DefaultWaitTimeout).Run(args)
+	if err != nil {
+		t.Fatalf("a passing command should succeed: %v", err)
+	}
+	if !strings.Contains(out, "clamped to") {
+		t.Errorf("out = %q, want the clamp explained", out)
+	}
+}
+
+// The wait description names the override and its cap, so a model that wants a
+// shorter or longer deadline knows the argument exists.
+func TestWait_TheDescriptionNamesTheOverride(t *testing.T) {
+	desc := Wait(t.TempDir(), DefaultWaitTimeout).Description
+	if !strings.Contains(desc, "timeout_seconds") {
+		t.Errorf("description = %q, want it to name the override", desc)
+	}
+	if !strings.Contains(desc, MaxWaitTimeout.String()) {
+		t.Errorf("description = %q, want it to name the cap", desc)
+	}
+}
