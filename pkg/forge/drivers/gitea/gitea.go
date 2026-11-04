@@ -32,6 +32,7 @@ func New(base, token string, h *http.Client) *Client {
 	return &Client{base: strings.TrimSuffix(base, "/"), token: token, http: h}
 }
 
+// Kind reports which forge REST shape this client speaks.
 func (c *Client) Kind() forge.Kind { return forge.KindGitea }
 
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
@@ -108,6 +109,7 @@ func (g gtComment) toForge() forge.Comment {
 	return forge.Comment{ID: g.ID, Body: g.Body, HTMLURL: g.HTMLURL, AuthorLogin: g.User.Login}
 }
 
+// ListIssueComments implements forge.Forge.
 func (c *Client) ListIssueComments(ctx context.Context, repo forge.Repo, number int) ([]forge.Comment, error) {
 	var out []forge.Comment
 	page := 1
@@ -128,6 +130,7 @@ func (c *Client) ListIssueComments(ctx context.Context, repo forge.Repo, number 
 	}
 }
 
+// CreateIssueComment implements forge.Forge.
 func (c *Client) CreateIssueComment(ctx context.Context, repo forge.Repo, number int, body string) (forge.Comment, error) {
 	var out gtComment
 	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", repo.Owner, repo.Name, number)
@@ -137,6 +140,7 @@ func (c *Client) CreateIssueComment(ctx context.Context, repo forge.Repo, number
 	return out.toForge(), nil
 }
 
+// UpdateIssueComment implements forge.Forge.
 func (c *Client) UpdateIssueComment(ctx context.Context, repo forge.Repo, commentID int64, body string) (forge.Comment, error) {
 	var out gtComment
 	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%s", repo.Owner, repo.Name, strconv.FormatInt(commentID, 10))
@@ -169,6 +173,7 @@ func (p gtPull) toForge() forge.PullRequest {
 	}
 }
 
+// GetPullRequest implements forge.Forge.
 func (c *Client) GetPullRequest(ctx context.Context, repo forge.Repo, number int) (forge.PullRequest, error) {
 	var out gtPull
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", repo.Owner, repo.Name, number)
@@ -178,6 +183,7 @@ func (c *Client) GetPullRequest(ctx context.Context, repo forge.Repo, number int
 	return out.toForge(), nil
 }
 
+// FindOpenPRByHead implements forge.Forge.
 func (c *Client) FindOpenPRByHead(ctx context.Context, repo forge.Repo, head string) (forge.PullRequest, error) {
 	// Gitea's /pulls has no head filter; list open and match client-side.
 	var out []gtPull
@@ -193,6 +199,7 @@ func (c *Client) FindOpenPRByHead(ctx context.Context, repo forge.Repo, head str
 	return forge.PullRequest{}, fmt.Errorf("%w: no open PR for head %q", forge.ErrNotFound, head)
 }
 
+// EnsurePR implements forge.Forge (adopt-or-create).
 func (c *Client) EnsurePR(ctx context.Context, opt forge.OpenPROptions) (forge.PullRequest, error) {
 	if pr, err := c.FindOpenPRByHead(ctx, opt.Repo, opt.Head); err == nil {
 		return pr, nil // adopt

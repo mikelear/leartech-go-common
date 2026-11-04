@@ -82,12 +82,12 @@ func TestStatusMapping(t *testing.T) {
 
 func TestCommentCRUD(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet:
+		switch r.Method {
+		case http.MethodGet:
 			w.Write([]byte(`[{"id":11,"body":"hi","user":{"login":"bot"}}]`))
-		case r.Method == http.MethodPost:
+		case http.MethodPost:
 			w.Write([]byte(`{"id":12,"body":"new"}`))
-		case r.Method == http.MethodPatch:
+		case http.MethodPatch:
 			w.Write([]byte(`{"id":11,"body":"edited"}`))
 		}
 	}))
