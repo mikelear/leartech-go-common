@@ -1,0 +1,51 @@
+package forge_test
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/mikelear/leartech-go-common/pkg/forge"
+)
+
+func TestParseKind(t *testing.T) {
+	cases := map[string]struct {
+		want forge.Kind
+		err  bool
+	}{
+		"github":  {forge.KindGitHub, false},
+		"GitHub":  {forge.KindGitHub, false},
+		"gitea":   {forge.KindGitea, false},
+		"forgejo": {forge.KindGitea, false}, // Forgejo speaks the Gitea API
+		" gitea ": {forge.KindGitea, false},
+		"gitlab":  {"", true},
+		"":        {"", true},
+	}
+	for in, c := range cases {
+		got, err := forge.ParseKind(in)
+		if c.err {
+			if err == nil {
+				t.Errorf("ParseKind(%q): want error, got %q", in, got)
+			}
+			if err != nil && !errors.Is(err, forge.ErrUnsupported) {
+				t.Errorf("ParseKind(%q): want ErrUnsupported, got %v", in, err)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("ParseKind(%q) = %q,%v; want %q,nil", in, got, err, c.want)
+		}
+	}
+}
+
+func TestStickyMarker_IsAnInvisibleHTMLComment(t *testing.T) {
+	m := forge.StickyMarker("coverage")
+	if m != "<!-- leartech-sticky: coverage -->" {
+		t.Fatalf("marker = %q", m)
+	}
+}
+
+func TestRepoString(t *testing.T) {
+	if got := (forge.Repo{Owner: "mikelear", Name: "x"}).String(); got != "mikelear/x" {
+		t.Fatalf("Repo.String = %q", got)
+	}
+}
