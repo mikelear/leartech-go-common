@@ -16,7 +16,6 @@ func TestParseKind(t *testing.T) {
 		"GitHub":  {forge.KindGitHub, false},
 		"gitea":   {forge.KindGitea, false},
 		"forgejo": {forge.KindGitea, false}, // Forgejo speaks the Gitea API
-		" gitea ": {forge.KindGitea, false},
 		"gitlab":  {"", true},
 		"":        {"", true},
 	}
@@ -34,6 +33,13 @@ func TestParseKind(t *testing.T) {
 		if err != nil || got != c.want {
 			t.Errorf("ParseKind(%q) = %q,%v; want %q,nil", in, got, err, c.want)
 		}
+	}
+}
+
+func TestParseKind_TrimsSurroundingSpace(t *testing.T) {
+	got, err := forge.ParseKind("  gitea  ")
+	if err != nil || got != forge.KindGitea {
+		t.Fatalf("ParseKind with spaces = %q,%v; want gitea,nil", got, err)
 	}
 }
 
