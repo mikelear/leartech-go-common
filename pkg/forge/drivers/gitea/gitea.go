@@ -17,7 +17,7 @@ import (
 
 // Client implements forge.Forge against the Gitea/Forgejo REST API (/api/v1).
 type Client struct {
-	base  string // instance base, e.g. https://forgejo.jx.leartech.com
+	base  string // instance base, e.g. https://forgejo.example.com
 	token string
 	http  *http.Client
 }
