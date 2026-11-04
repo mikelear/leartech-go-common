@@ -97,6 +97,27 @@ type OpenPROptions struct {
 	Body  string
 }
 
+// ChangedFile is one file in a PR's diff. Status is the forge's word for the
+// change (added/modified/removed/renamed); Additions/Deletions are line counts.
+type ChangedFile struct {
+	Path      string
+	Status    string
+	Additions int
+	Deletions int
+}
+
+// PRState filters FindPRByHead. Open matches only open PRs; All matches any state
+// (so an already-MERGED PR is visible — the merge-blind "open only" query was a
+// real false-negative source for post-merge checks).
+type PRState string
+
+const (
+	// StateOpen matches only open PRs.
+	StateOpen PRState = "open"
+	// StateAll matches PRs in any state (open, closed, merged).
+	StateAll PRState = "all"
+)
+
 // Forge is the forge-neutral surface. Every method takes a context and returns a
 // wrapped sentinel on failure. The read methods are read-only; EnsurePR is
 // adopt-or-create (see its own doc).
@@ -119,6 +140,19 @@ type Forge interface {
 
 	// FindOpenPRByHead returns the open PR whose head is branch, or ErrNotFound.
 	FindOpenPRByHead(ctx context.Context, repo Repo, head string) (PullRequest, error)
+
+	// FindPRByHead returns the most-recent PR whose head is branch in the given
+	// state (Open or All), or ErrNotFound. StateAll surfaces a MERGED PR, which
+	// the open-only FindOpenPRByHead does not return.
+	//
+	// proven-by: TestFindPRByHead_AllSurfacesMerged
+	FindPRByHead(ctx context.Context, repo Repo, head string, state PRState) (PullRequest, error)
+
+	// ChangedFiles returns the files in a PR's diff, following pagination.
+	ChangedFiles(ctx context.Context, repo Repo, number int) ([]ChangedFile, error)
+
+	// PullRequestDiff returns the raw unified diff for a PR.
+	PullRequestDiff(ctx context.Context, repo Repo, number int) (string, error)
 
 	// EnsurePR adopts the open PR already on the head branch, or creates one. A
 	// second call with the same head returns the same PR rather than a

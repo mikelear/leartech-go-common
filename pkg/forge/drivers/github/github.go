@@ -222,3 +222,69 @@ func (c *Client) EnsurePR(ctx context.Context, opt forge.OpenPROptions) (forge.P
 }
 
 var _ forge.Forge = (*Client)(nil)
+
+type ghFile struct {
+	Filename  string `json:"filename"`
+	Status    string `json:"status"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+// ChangedFiles implements forge.Forge.
+func (c *Client) ChangedFiles(ctx context.Context, repo forge.Repo, number int) ([]forge.ChangedFile, error) {
+	var out []forge.ChangedFile
+	page := 1
+	for {
+		var batch []ghFile
+		path := fmt.Sprintf("/repos/%s/%s/pulls/%d/files?per_page=100&page=%d",
+			repo.Owner, repo.Name, number, page)
+		if err := c.do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+			return nil, err
+		}
+		for _, f := range batch {
+			out = append(out, forge.ChangedFile{Path: f.Filename, Status: f.Status, Additions: f.Additions, Deletions: f.Deletions})
+		}
+		if len(batch) < 100 {
+			return out, nil
+		}
+		page++
+	}
+}
+
+// PullRequestDiff implements forge.Forge. It requests the raw unified diff via the
+// GitHub v3.diff Accept header.
+func (c *Client) PullRequestDiff(ctx context.Context, repo forge.Repo, number int) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/repos/%s/%s/pulls/%d", c.base, repo.Owner, repo.Name, number), nil)
+	if err != nil {
+		return "", fmt.Errorf("github: build diff request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3.diff")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("github: get diff: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	if err := statusError(resp.StatusCode, raw); err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// FindPRByHead implements forge.Forge. StateAll surfaces a MERGED PR.
+func (c *Client) FindPRByHead(ctx context.Context, repo forge.Repo, head string, state forge.PRState) (forge.PullRequest, error) {
+	var out []ghPull
+	path := fmt.Sprintf("/repos/%s/%s/pulls?state=%s&head=%s:%s&per_page=1",
+		repo.Owner, repo.Name, state, repo.Owner, head)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return forge.PullRequest{}, err
+	}
+	if len(out) == 0 {
+		return forge.PullRequest{}, fmt.Errorf("%w: no %s PR for head %q", forge.ErrNotFound, state, head)
+	}
+	return out[0].toForge(), nil
+}

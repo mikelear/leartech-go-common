@@ -169,3 +169,38 @@ func TestListComments_Paginates(t *testing.T) {
 		t.Fatalf("paginate: calls=%d n=%d err=%v", calls, len(out), err)
 	}
 }
+
+func TestChangedFilesAndDiff(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".diff") {
+			w.Write([]byte("diff --git a/x b/x\n"))
+			return
+		}
+		w.Write([]byte(`[{"filename":"f","status":"modified","additions":2,"deletions":1}]`))
+	}))
+	defer srv.Close()
+	c := gitea.New(srv.URL, "t", srv.Client())
+	files, err := c.ChangedFiles(context.Background(), forge.Repo{Owner: "o", Name: "r"}, 1)
+	if err != nil || len(files) != 1 || files[0].Path != "f" {
+		t.Fatalf("files: %+v %v", files, err)
+	}
+	d, err := c.PullRequestDiff(context.Background(), forge.Repo{Owner: "o", Name: "r"}, 1)
+	if err != nil || !strings.Contains(d, "diff --git") {
+		t.Fatalf("diff: %q %v", d, err)
+	}
+}
+
+func TestFindPRByHead_AllMatchesMerged(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") != "all" {
+			t.Errorf("state = %q, want all", r.URL.Query().Get("state"))
+		}
+		w.Write([]byte(`[{"number":4,"state":"closed","merged":true,"head":{"ref":"feat"}}]`))
+	}))
+	defer srv.Close()
+	c := gitea.New(srv.URL, "t", srv.Client())
+	pr, err := c.FindPRByHead(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "feat", forge.StateAll)
+	if err != nil || !pr.Merged || pr.Number != 4 {
+		t.Fatalf("find all: %+v %v", pr, err)
+	}
+}
