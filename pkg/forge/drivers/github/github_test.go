@@ -229,3 +229,31 @@ func TestFindPRByHead_AllSurfacesMerged(t *testing.T) {
 		t.Fatalf("find all: pr=%+v state=%q err=%v", pr, gotState, err)
 	}
 }
+
+func TestGetPullRequest_RichFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{
+			"number": 5, "state": "closed", "merged": true,
+			"merged_at": "2026-01-02T03:04:05Z", "merge_commit_sha": "abc123",
+			"mergeable_state": "clean",
+			"head": {"ref": "feat", "sha": "headsha"},
+			"base": {"ref": "main", "sha": "basesha"},
+			"labels": [{"name": "do-not-merge/hold"}, {"name": "size/M"}]
+		}`))
+	}))
+	defer srv.Close()
+	c := github.New(srv.URL, "t", srv.Client())
+	pr, err := c.GetPullRequest(context.Background(), forge.Repo{Owner: "o", Name: "r"}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.HeadSHA != "headsha" || pr.BaseSHA != "basesha" {
+		t.Errorf("SHAs: head=%q base=%q", pr.HeadSHA, pr.BaseSHA)
+	}
+	if pr.MergedAt != "2026-01-02T03:04:05Z" || pr.MergeCommitSHA != "abc123" || pr.Mergeable != "clean" {
+		t.Errorf("merge fields: %+v", pr)
+	}
+	if len(pr.Labels) != 2 || pr.Labels[0] != "do-not-merge/hold" {
+		t.Errorf("labels: %v", pr.Labels)
+	}
+}

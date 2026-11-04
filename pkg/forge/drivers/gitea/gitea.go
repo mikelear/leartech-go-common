@@ -151,25 +151,53 @@ func (c *Client) UpdateIssueComment(ctx context.Context, repo forge.Repo, commen
 }
 
 type gtPull struct {
-	Number  int    `json:"number"`
-	Title   string `json:"title"`
-	Body    string `json:"body"`
-	State   string `json:"state"`
-	Merged  bool   `json:"merged"`
-	HTMLURL string `json:"html_url"`
-	Head    struct {
+	Number         int    `json:"number"`
+	Title          string `json:"title"`
+	Body           string `json:"body"`
+	State          string `json:"state"`
+	Merged         bool   `json:"merged"`
+	MergedAt       string `json:"merged_at"`
+	MergeCommitSHA string `json:"merge_commit_sha"`
+	Mergeable      bool   `json:"mergeable"`
+	HTMLURL        string `json:"html_url"`
+	Head           struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"head"`
 	Base struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"base"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
 }
 
 func (p gtPull) toForge() forge.PullRequest {
+	labels := make([]string, 0, len(p.Labels))
+	for _, l := range p.Labels {
+		if l.Name != "" {
+			labels = append(labels, l.Name)
+		}
+	}
+	// Gitea reports mergeable as a bool, not GitHub's word. Map it onto the
+	// shared Mergeable string so a caller reads one field across forges:
+	// "clean" when mergeable, "dirty" when not.
+	mergeable := ""
+	if p.State == "open" {
+		if p.Mergeable {
+			mergeable = "clean"
+		} else {
+			mergeable = "dirty"
+		}
+	}
 	return forge.PullRequest{
 		Number: p.Number, Title: p.Title, Body: p.Body,
 		HeadBranch: p.Head.Ref, BaseBranch: p.Base.Ref,
-		State: p.State, Merged: p.Merged, HTMLURL: p.HTMLURL,
+		HeadSHA: p.Head.SHA, BaseSHA: p.Base.SHA,
+		State: p.State, Merged: p.Merged, MergedAt: p.MergedAt,
+		MergeCommitSHA: p.MergeCommitSHA, Mergeable: mergeable,
+		Labels: labels, HTMLURL: p.HTMLURL,
 	}
 }
 

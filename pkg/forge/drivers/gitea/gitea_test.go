@@ -204,3 +204,25 @@ func TestFindPRByHead_AllMatchesMerged(t *testing.T) {
 		t.Fatalf("find all: %+v %v", pr, err)
 	}
 }
+
+func TestGetPullRequest_MapsMergeableBoolAndLabels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{
+			"number": 5, "state": "open", "mergeable": true,
+			"head": {"ref": "feat", "sha": "h"}, "base": {"ref": "main", "sha": "b"},
+			"labels": [{"name": "size/S"}]
+		}`))
+	}))
+	defer srv.Close()
+	c := gitea.New(srv.URL, "t", srv.Client())
+	pr, err := c.GetPullRequest(context.Background(), forge.Repo{Owner: "o", Name: "r"}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.Mergeable != "clean" {
+		t.Errorf("gitea mergeable bool should map to 'clean', got %q", pr.Mergeable)
+	}
+	if pr.HeadSHA != "h" || len(pr.Labels) != 1 || pr.Labels[0] != "size/S" {
+		t.Errorf("rich fields: %+v", pr)
+	}
+}

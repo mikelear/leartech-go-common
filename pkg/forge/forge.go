@@ -83,9 +83,22 @@ type PullRequest struct {
 	Body       string
 	HeadBranch string
 	BaseBranch string
-	State      string // "open" | "closed"
-	Merged     bool
-	HTMLURL    string
+	// HeadSHA and BaseSHA are the tip commit SHAs of the head and base refs.
+	HeadSHA string
+	BaseSHA string
+	State   string // "open" | "closed"
+	Merged  bool
+	// MergedAt is the merge timestamp (RFC3339) or empty when not merged.
+	MergedAt string
+	// MergeCommitSHA is the SHA of the merge commit, when merged.
+	MergeCommitSHA string
+	// Mergeable is the forge's mergeability word (GitHub mergeable_state:
+	// "clean"/"dirty"/"blocked"/…). Empty when the forge has not computed it
+	// yet, or when the forge does not report one — callers tolerate empty.
+	Mergeable string
+	// Labels are the PR's label names, in the order the forge returns them.
+	Labels  []string
+	HTMLURL string
 }
 
 // OpenPROptions is the input to EnsurePR.

@@ -160,25 +160,42 @@ func (c *Client) UpdateIssueComment(ctx context.Context, repo forge.Repo, commen
 }
 
 type ghPull struct {
-	Number  int    `json:"number"`
-	Title   string `json:"title"`
-	Body    string `json:"body"`
-	State   string `json:"state"`
-	Merged  bool   `json:"merged"`
-	HTMLURL string `json:"html_url"`
-	Head    struct {
+	Number         int    `json:"number"`
+	Title          string `json:"title"`
+	Body           string `json:"body"`
+	State          string `json:"state"`
+	Merged         bool   `json:"merged"`
+	MergedAt       string `json:"merged_at"`
+	MergeCommitSHA string `json:"merge_commit_sha"`
+	Mergeable      string `json:"mergeable_state"`
+	HTMLURL        string `json:"html_url"`
+	Head           struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"head"`
 	Base struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"base"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
 }
 
 func (p ghPull) toForge() forge.PullRequest {
+	labels := make([]string, 0, len(p.Labels))
+	for _, l := range p.Labels {
+		if l.Name != "" {
+			labels = append(labels, l.Name)
+		}
+	}
 	return forge.PullRequest{
 		Number: p.Number, Title: p.Title, Body: p.Body,
 		HeadBranch: p.Head.Ref, BaseBranch: p.Base.Ref,
-		State: p.State, Merged: p.Merged, HTMLURL: p.HTMLURL,
+		HeadSHA: p.Head.SHA, BaseSHA: p.Base.SHA,
+		State: p.State, Merged: p.Merged, MergedAt: p.MergedAt,
+		MergeCommitSHA: p.MergeCommitSHA, Mergeable: p.Mergeable,
+		Labels: labels, HTMLURL: p.HTMLURL,
 	}
 }
 
