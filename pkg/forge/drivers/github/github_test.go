@@ -140,3 +140,33 @@ func indexOf(h, n string) int {
 	}
 	return -1
 }
+
+func TestCommentCRUD(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Write([]byte(`[{"id":11,"body":"hi","user":{"login":"bot"}}]`))
+		case http.MethodPost:
+			w.WriteHeader(201)
+			w.Write([]byte(`{"id":12,"body":"new","html_url":"u"}`))
+		case http.MethodPatch:
+			w.Write([]byte(`{"id":11,"body":"edited"}`))
+		}
+	}))
+	defer srv.Close()
+	c := github.New(srv.URL, "t", srv.Client())
+	repo := forge.Repo{Owner: "o", Name: "r"}
+
+	list, err := c.ListIssueComments(context.Background(), repo, 1)
+	if err != nil || len(list) != 1 || list[0].AuthorLogin != "bot" {
+		t.Fatalf("list: %+v %v", list, err)
+	}
+	cr, err := c.CreateIssueComment(context.Background(), repo, 1, "new")
+	if err != nil || cr.ID != 12 || cr.HTMLURL != "u" {
+		t.Fatalf("create: %+v %v", cr, err)
+	}
+	up, err := c.UpdateIssueComment(context.Background(), repo, 11, "edited")
+	if err != nil || up.Body != "edited" {
+		t.Fatalf("update: %+v %v", up, err)
+	}
+}
