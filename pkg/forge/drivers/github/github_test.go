@@ -170,3 +170,62 @@ func TestCommentCRUD(t *testing.T) {
 		t.Fatalf("update: %+v %v", up, err)
 	}
 }
+
+func TestChangedFiles_Paginates(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Query().Get("page") == "1" {
+			out := "["
+			for i := 0; i < 100; i++ {
+				if i > 0 {
+					out += ","
+				}
+				out += `{"filename":"f","status":"modified","additions":1,"deletions":0}`
+			}
+			w.Write([]byte(out + "]"))
+			return
+		}
+		w.Write([]byte(`[{"filename":"last","status":"added","additions":3,"deletions":0}]`))
+	}))
+	defer srv.Close()
+	c := github.New(srv.URL, "t", srv.Client())
+	files, err := c.ChangedFiles(context.Background(), forge.Repo{Owner: "o", Name: "r"}, 1)
+	if err != nil || calls != 2 || len(files) != 101 {
+		t.Fatalf("files: calls=%d n=%d err=%v", calls, len(files), err)
+	}
+	if files[100].Path != "last" || files[100].Status != "added" {
+		t.Fatalf("last file wrong: %+v", files[100])
+	}
+}
+
+func TestPullRequestDiff_SendsDiffAcceptHeader(t *testing.T) {
+	var accept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accept = r.Header.Get("Accept")
+		w.Write([]byte("diff --git a/x b/x\n"))
+	}))
+	defer srv.Close()
+	c := github.New(srv.URL, "t", srv.Client())
+	d, err := c.PullRequestDiff(context.Background(), forge.Repo{Owner: "o", Name: "r"}, 1)
+	if err != nil || !contains(d, "diff --git") {
+		t.Fatalf("diff: %q %v", d, err)
+	}
+	if accept != "application/vnd.github.v3.diff" {
+		t.Fatalf("accept header = %q", accept)
+	}
+}
+
+func TestFindPRByHead_AllSurfacesMerged(t *testing.T) {
+	var gotState string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotState = r.URL.Query().Get("state")
+		w.Write([]byte(`[{"number":3,"state":"closed","merged":true,"head":{"ref":"feat"}}]`))
+	}))
+	defer srv.Close()
+	c := github.New(srv.URL, "t", srv.Client())
+	pr, err := c.FindPRByHead(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "feat", forge.StateAll)
+	if err != nil || !pr.Merged || gotState != "all" {
+		t.Fatalf("find all: pr=%+v state=%q err=%v", pr, gotState, err)
+	}
+}

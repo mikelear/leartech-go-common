@@ -49,6 +49,15 @@ func (f *fakeForge) GetPullRequest(context.Context, forge.Repo, int) (forge.Pull
 func (f *fakeForge) FindOpenPRByHead(context.Context, forge.Repo, string) (forge.PullRequest, error) {
 	return forge.PullRequest{}, forge.ErrNotFound
 }
+func (f *fakeForge) FindPRByHead(context.Context, forge.Repo, string, forge.PRState) (forge.PullRequest, error) {
+	return forge.PullRequest{}, forge.ErrNotFound
+}
+func (f *fakeForge) ChangedFiles(context.Context, forge.Repo, int) ([]forge.ChangedFile, error) {
+	return nil, nil
+}
+func (f *fakeForge) PullRequestDiff(context.Context, forge.Repo, int) (string, error) {
+	return "", nil
+}
 func (f *fakeForge) EnsurePR(context.Context, forge.OpenPROptions) (forge.PullRequest, error) {
 	return forge.PullRequest{}, nil
 }
