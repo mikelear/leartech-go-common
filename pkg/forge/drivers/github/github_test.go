@@ -2,6 +2,7 @@ package github_test
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -255,5 +256,98 @@ func TestGetPullRequest_RichFields(t *testing.T) {
 	}
 	if len(pr.Labels) != 2 || pr.Labels[0] != "do-not-merge/hold" {
 		t.Errorf("labels: %v", pr.Labels)
+	}
+}
+
+func TestGetIssue_SurfacesBodyLabelsAndState(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/issues/12" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"number":12,"title":"why?","body":"the body","state":"open",
+			"html_url":"u","labels":[{"name":"ba-question"},{"name":""}]}`))
+	}))
+	defer srv.Close()
+	is, err := github.New(srv.URL, "t", srv.Client()).GetIssue(context.Background(), forge.Repo{Owner: "o", Name: "r"}, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if is.Title != "why?" || is.Body != "the body" || is.State != "open" || is.URL != "u" {
+		t.Fatalf("%+v", is)
+	}
+	if len(is.Labels) != 1 || is.Labels[0] != "ba-question" {
+		t.Fatalf("labels: %v", is.Labels)
+	}
+}
+
+// GitHub returns contents base64-encoded WITH embedded newlines; a decoder that
+// does not strip them fails on the first line break, which is why this asserts
+// the decoded text rather than the status.
+func TestFileAt_DecodesBase64WithNewlines(t *testing.T) {
+	body := "line one\nline two\n"
+	enc := base64.StdEncoding.EncodeToString([]byte(body))
+	// JSON cannot carry a raw newline inside a string, so the fixture escapes
+	// it the way GitHub does on the wire (a literal backslash-n in the body).
+	wrapped := enc[:8] + `\n` + enc[8:] + `\n`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("ref") != "v1" {
+			t.Errorf("ref = %q", r.URL.Query().Get("ref"))
+		}
+		w.Write([]byte(`{"path":"docs/a.md","encoding":"base64","content":"` + wrapped + `"}`))
+	}))
+	defer srv.Close()
+	f, err := github.New(srv.URL, "t", srv.Client()).FileAt(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "docs/a.md", "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Content != body || f.Path != "docs/a.md" {
+		t.Fatalf("file = %+v", f)
+	}
+}
+
+func TestHeadSHA(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/commits/main" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"sha":"abc123"}`))
+	}))
+	defer srv.Close()
+	sha, err := github.New(srv.URL, "t", srv.Client()).HeadSHA(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "main")
+	if err != nil || sha != "abc123" {
+		t.Fatalf("%q %v", sha, err)
+	}
+}
+
+func TestHeadSHA_EmptySHAIsNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	_, err := github.New(srv.URL, "t", srv.Client()).HeadSHA(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "main")
+	if !errors.Is(err, forge.ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestCompareRefs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/compare/old...new" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"ahead_by":2,"behind_by":0,
+			"commits":[{"sha":"c1","commit":{"message":"one"}},{"sha":"c2","commit":{"message":"two"}}],
+			"files":[{"filename":"a.go","status":"modified","additions":3,"deletions":1}]}`))
+	}))
+	defer srv.Close()
+	cmp, err := github.New(srv.URL, "t", srv.Client()).CompareRefs(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "old", "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmp.AheadBy != 2 || len(cmp.Commits) != 2 || cmp.Commits[1].Message != "two" {
+		t.Fatalf("%+v", cmp)
+	}
+	if len(cmp.Files) != 1 || cmp.Files[0].Path != "a.go" {
+		t.Fatalf("files: %+v", cmp.Files)
 	}
 }

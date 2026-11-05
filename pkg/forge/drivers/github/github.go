@@ -4,6 +4,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -304,4 +305,109 @@ func (c *Client) FindPRByHead(ctx context.Context, repo forge.Repo, head string,
 		return forge.PullRequest{}, fmt.Errorf("%w: no %s PR for head %q", forge.ErrNotFound, state, head)
 	}
 	return out[0].toForge(), nil
+}
+
+type ghIssue struct {
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	Body    string `json:"body"`
+	State   string `json:"state"`
+	HTMLURL string `json:"html_url"`
+	Labels  []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+}
+
+// GetIssue implements forge.Forge.
+func (c *Client) GetIssue(ctx context.Context, repo forge.Repo, number int) (forge.Issue, error) {
+	var out ghIssue
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", repo.Owner, repo.Name, number)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return forge.Issue{}, err
+	}
+	labels := make([]string, 0, len(out.Labels))
+	for _, l := range out.Labels {
+		if l.Name != "" {
+			labels = append(labels, l.Name)
+		}
+	}
+	return forge.Issue{
+		Number: out.Number, Title: out.Title, Body: out.Body,
+		State: out.State, Labels: labels, URL: out.HTMLURL,
+	}, nil
+}
+
+// FileAt implements forge.Forge.
+func (c *Client) FileAt(ctx context.Context, repo forge.Repo, path, ref string) (forge.File, error) {
+	var out struct {
+		Path     string `json:"path"`
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	u := fmt.Sprintf("/repos/%s/%s/contents/%s", repo.Owner, repo.Name, strings.TrimPrefix(path, "/"))
+	if ref != "" {
+		u += "?ref=" + ref
+	}
+	if err := c.do(ctx, http.MethodGet, u, nil, &out); err != nil {
+		return forge.File{}, err
+	}
+	// GitHub returns base64 with embedded newlines, and a decoder that does not
+	// strip them fails on the first line break.
+	raw := strings.ReplaceAll(out.Content, "\n", "")
+	dec, derr := base64.StdEncoding.DecodeString(raw)
+	if derr != nil {
+		return forge.File{}, fmt.Errorf("github: decode contents of %s: %w", path, derr)
+	}
+	p := out.Path
+	if p == "" {
+		p = path
+	}
+	return forge.File{Path: p, Content: string(dec)}, nil
+}
+
+// HeadSHA implements forge.Forge.
+func (c *Client) HeadSHA(ctx context.Context, repo forge.Repo, ref string) (string, error) {
+	if ref == "" {
+		ref = "HEAD"
+	}
+	var out struct {
+		SHA string `json:"sha"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/commits/%s", repo.Owner, repo.Name, ref)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return "", err
+	}
+	if out.SHA == "" {
+		return "", fmt.Errorf("%w: no commit at ref %q in %s", forge.ErrNotFound, ref, repo)
+	}
+	return out.SHA, nil
+}
+
+// CompareRefs implements forge.Forge.
+func (c *Client) CompareRefs(ctx context.Context, repo forge.Repo, base, head string) (forge.Compare, error) {
+	var out struct {
+		AheadBy  int `json:"ahead_by"`
+		BehindBy int `json:"behind_by"`
+		Commits  []struct {
+			SHA    string `json:"sha"`
+			Commit struct {
+				Message string `json:"message"`
+			} `json:"commit"`
+		} `json:"commits"`
+		Files []ghFile `json:"files"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s", repo.Owner, repo.Name, base, head)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return forge.Compare{}, err
+	}
+	cmp := forge.Compare{AheadBy: out.AheadBy, BehindBy: out.BehindBy}
+	for _, cm := range out.Commits {
+		cmp.Commits = append(cmp.Commits, forge.Commit{SHA: cm.SHA, Message: cm.Commit.Message})
+	}
+	for _, f := range out.Files {
+		cmp.Files = append(cmp.Files, forge.ChangedFile{
+			Path: f.Filename, Status: f.Status, Additions: f.Additions, Deletions: f.Deletions,
+		})
+	}
+	return cmp, nil
 }

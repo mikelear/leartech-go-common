@@ -2,6 +2,7 @@ package gitea_test
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -224,5 +225,48 @@ func TestGetPullRequest_MapsMergeableBoolAndLabels(t *testing.T) {
 	}
 	if pr.HeadSHA != "h" || len(pr.Labels) != 1 || pr.Labels[0] != "size/S" {
 		t.Errorf("rich fields: %+v", pr)
+	}
+}
+
+func TestGetIssueAndFileAt(t *testing.T) {
+	body := "hello\n"
+	enc := base64.StdEncoding.EncodeToString([]byte(body))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/contents/") {
+			w.Write([]byte(`{"path":"a.txt","encoding":"base64","content":"` + enc + `"}`))
+			return
+		}
+		w.Write([]byte(`{"number":4,"title":"t","body":"b","state":"open","labels":[{"name":"x"}]}`))
+	}))
+	defer srv.Close()
+	c := gitea.New(srv.URL, "t", srv.Client())
+	is, err := c.GetIssue(context.Background(), forge.Repo{Owner: "o", Name: "r"}, 4)
+	if err != nil || is.Title != "t" || len(is.Labels) != 1 {
+		t.Fatalf("issue: %+v %v", is, err)
+	}
+	f, err := c.FileAt(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "a.txt", "")
+	if err != nil || f.Content != body {
+		t.Fatalf("file: %+v %v", f, err)
+	}
+}
+
+func TestHeadSHAAndCompareRefs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/compare/") {
+			w.Write([]byte(`{"total_commits":1,"commits":[{"sha":"c1","commit":{"message":"m"}}],
+				"files":[{"filename":"a","status":"added","additions":1,"deletions":0}]}`))
+			return
+		}
+		w.Write([]byte(`{"sha":"deadbeef"}`))
+	}))
+	defer srv.Close()
+	c := gitea.New(srv.URL, "t", srv.Client())
+	sha, err := c.HeadSHA(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "main")
+	if err != nil || sha != "deadbeef" {
+		t.Fatalf("%q %v", sha, err)
+	}
+	cmp, err := c.CompareRefs(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "a", "b")
+	if err != nil || cmp.AheadBy != 1 || len(cmp.Files) != 1 {
+		t.Fatalf("%+v %v", cmp, err)
 	}
 }
