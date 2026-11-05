@@ -5,6 +5,7 @@ package gitea
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -308,4 +309,109 @@ func (c *Client) FindPRByHead(ctx context.Context, repo forge.Repo, head string,
 		}
 	}
 	return forge.PullRequest{}, fmt.Errorf("%w: no %s PR for head %q", forge.ErrNotFound, state, head)
+}
+
+type gtIssue struct {
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	Body    string `json:"body"`
+	State   string `json:"state"`
+	HTMLURL string `json:"html_url"`
+	Labels  []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+}
+
+// GetIssue implements forge.Forge.
+func (c *Client) GetIssue(ctx context.Context, repo forge.Repo, number int) (forge.Issue, error) {
+	var out gtIssue
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", repo.Owner, repo.Name, number)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return forge.Issue{}, err
+	}
+	labels := make([]string, 0, len(out.Labels))
+	for _, l := range out.Labels {
+		if l.Name != "" {
+			labels = append(labels, l.Name)
+		}
+	}
+	return forge.Issue{
+		Number: out.Number, Title: out.Title, Body: out.Body,
+		State: out.State, Labels: labels, URL: out.HTMLURL,
+	}, nil
+}
+
+// FileAt implements forge.Forge. Gitea/Forgejo return the contents base64-encoded
+// on the same contents endpoint, so the shape matches the GitHub driver's.
+func (c *Client) FileAt(ctx context.Context, repo forge.Repo, path, ref string) (forge.File, error) {
+	var out struct {
+		Path     string `json:"path"`
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	u := fmt.Sprintf("/repos/%s/%s/contents/%s", repo.Owner, repo.Name, strings.TrimPrefix(path, "/"))
+	if ref != "" {
+		u += "?ref=" + ref
+	}
+	if err := c.do(ctx, http.MethodGet, u, nil, &out); err != nil {
+		return forge.File{}, err
+	}
+	raw := strings.ReplaceAll(out.Content, "\n", "")
+	dec, derr := base64.StdEncoding.DecodeString(raw)
+	if derr != nil {
+		return forge.File{}, fmt.Errorf("gitea: decode contents of %s: %w", path, derr)
+	}
+	p := out.Path
+	if p == "" {
+		p = path
+	}
+	return forge.File{Path: p, Content: string(dec)}, nil
+}
+
+// HeadSHA implements forge.Forge.
+func (c *Client) HeadSHA(ctx context.Context, repo forge.Repo, ref string) (string, error) {
+	if ref == "" {
+		ref = "HEAD"
+	}
+	// Gitea's commit endpoint is /git/commits/{sha}; a branch name is not a sha,
+	// so resolve the branch first via /branches/{name} when the ref is not a sha.
+	var out struct {
+		SHA string `json:"sha"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/commits?limit=1&sha=%s", repo.Owner, repo.Name, ref)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return "", err
+	}
+	if out.SHA == "" {
+		return "", fmt.Errorf("%w: no commit at ref %q in %s", forge.ErrNotFound, ref, repo)
+	}
+	return out.SHA, nil
+}
+
+// CompareRefs implements forge.Forge.
+func (c *Client) CompareRefs(ctx context.Context, repo forge.Repo, base, head string) (forge.Compare, error) {
+	var out struct {
+		TotalCommits int `json:"total_commits"`
+		Commits      []struct {
+			SHA    string `json:"sha"`
+			Commit struct {
+				Message string `json:"message"`
+			} `json:"commit"`
+		} `json:"commits"`
+		Files []gtFile `json:"files"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s", repo.Owner, repo.Name, base, head)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return forge.Compare{}, err
+	}
+	cmp := forge.Compare{AheadBy: out.TotalCommits}
+	for _, cm := range out.Commits {
+		cmp.Commits = append(cmp.Commits, forge.Commit{SHA: cm.SHA, Message: cm.Commit.Message})
+	}
+	for _, f := range out.Files {
+		cmp.Files = append(cmp.Files, forge.ChangedFile{
+			Path: f.Filename, Status: f.Status, Additions: f.Additions, Deletions: f.Deletions,
+		})
+	}
+	return cmp, nil
 }

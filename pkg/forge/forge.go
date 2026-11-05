@@ -131,6 +131,44 @@ const (
 	StateAll PRState = "all"
 )
 
+// Issue is the subset of an issue the estate's consumers use. An issue and a
+// pull request share one number space on both forges, which is why the comment
+// methods above take an "issue or PR" number.
+type Issue struct {
+	Number int
+	Title  string
+	Body   string
+	State  string
+	Labels []string
+	URL    string
+}
+
+// File is one file's contents at a ref.
+type File struct {
+	Path    string
+	Content string
+	// Truncated reports a partial body. GitHub truncates above its size limit,
+	// so a caller that needs the whole file treats true as a hard stop rather
+	// than reading a silent prefix.
+	Truncated bool
+}
+
+// Commit is one commit's identity.
+type Commit struct {
+	SHA     string
+	Message string
+}
+
+// Compare is two refs compared: the commits between them and the files that
+// changed. Files carries the same shape ChangedFiles returns, so a consumer
+// rendering a PR diff and one rendering a compare read the same type.
+type Compare struct {
+	AheadBy  int
+	BehindBy int
+	Commits  []Commit
+	Files    []ChangedFile
+}
+
 // Forge is the forge-neutral surface. Every method takes a context and returns a
 // wrapped sentinel on failure. The read methods are read-only; EnsurePR is
 // adopt-or-create (see its own doc).
@@ -166,6 +204,22 @@ type Forge interface {
 
 	// PullRequestDiff returns the raw unified diff for a PR.
 	PullRequestDiff(ctx context.Context, repo Repo, number int) (string, error)
+
+	// GetIssue reads one issue.
+	GetIssue(ctx context.Context, repo Repo, number int) (Issue, error)
+
+	// FileAt reads one file's contents at ref. ref may be a branch, tag or SHA;
+	// empty means the repo's default branch.
+	FileAt(ctx context.Context, repo Repo, path, ref string) (File, error)
+
+	// HeadSHA returns the commit SHA at ref (a branch, tag or SHA; empty means
+	// the default branch). This answers "has this repo moved since the dossier"
+	// in one call.
+	HeadSHA(ctx context.Context, repo Repo, ref string) (string, error)
+
+	// CompareRefs compares two refs, returning the commits between them and the
+	// files that changed.
+	CompareRefs(ctx context.Context, repo Repo, base, head string) (Compare, error)
 
 	// EnsurePR adopts the open PR already on the head branch, or creates one. A
 	// second call with the same head returns the same PR rather than a

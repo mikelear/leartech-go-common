@@ -58,6 +58,18 @@ func (f *fakeForge) ChangedFiles(context.Context, forge.Repo, int) ([]forge.Chan
 func (f *fakeForge) PullRequestDiff(context.Context, forge.Repo, int) (string, error) {
 	return "", nil
 }
+func (f *fakeForge) GetIssue(context.Context, forge.Repo, int) (forge.Issue, error) {
+	return forge.Issue{}, forge.ErrNotFound
+}
+func (f *fakeForge) FileAt(context.Context, forge.Repo, string, string) (forge.File, error) {
+	return forge.File{}, forge.ErrNotFound
+}
+func (f *fakeForge) HeadSHA(context.Context, forge.Repo, string) (string, error) {
+	return "", forge.ErrNotFound
+}
+func (f *fakeForge) CompareRefs(context.Context, forge.Repo, string, string) (forge.Compare, error) {
+	return forge.Compare{}, forge.ErrNotFound
+}
 func (f *fakeForge) EnsurePR(context.Context, forge.OpenPROptions) (forge.PullRequest, error) {
 	return forge.PullRequest{}, nil
 }
