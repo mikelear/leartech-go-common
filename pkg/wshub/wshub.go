@@ -52,6 +52,11 @@ type Conn struct {
 	// or reads tenant/role.
 	Claims *auth.TokenClaims
 
+	// Bearer is the validated handshake token, kept so a service that mints a
+	// DOWNSTREAM credential on the user's behalf (e.g. console-api minting a
+	// per-session gateway key) can present it. Never sent back to the client.
+	Bearer string
+
 	ws *websocket.Conn
 }
 
@@ -151,7 +156,7 @@ func Serve(opts Options, h Handler) http.HandlerFunc {
 			return
 		}
 
-		conn := &Conn{Subject: claims.UserID, Claims: claims, ws: ws}
+		conn := &Conn{Subject: claims.UserID, Claims: claims, Bearer: token, ws: ws}
 		// The handler owns the connection's lifetime; close when it returns.
 		defer func() { _ = conn.Close() }()
 		h(r.Context(), conn)
