@@ -248,6 +248,53 @@ type ghFile struct {
 	Deletions int    `json:"deletions"`
 }
 
+// ListOpenPRs implements forge.Forge: every open PR, following pagination.
+func (c *Client) ListOpenPRs(ctx context.Context, repo forge.Repo) ([]forge.PullRequest, error) {
+	var out []forge.PullRequest
+	page := 1
+	for {
+		var batch []ghPull
+		path := fmt.Sprintf("/repos/%s/%s/pulls?state=open&per_page=100&page=%d",
+			repo.Owner, repo.Name, page)
+		if err := c.do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+			return nil, err
+		}
+		for _, b := range batch {
+			out = append(out, b.toForge())
+		}
+		if len(batch) < 100 {
+			return out, nil
+		}
+		page++
+	}
+}
+
+// ghStatus is the wire shape of one commit status.
+type ghStatus struct {
+	Context     string `json:"context"`
+	State       string `json:"state"`
+	TargetURL   string `json:"target_url"`
+	Description string `json:"description"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+// CommitStatuses implements forge.Forge: the statuses on one SHA.
+func (c *Client) CommitStatuses(ctx context.Context, repo forge.Repo, sha string) ([]forge.CommitStatus, error) {
+	var batch []ghStatus
+	path := fmt.Sprintf("/repos/%s/%s/statuses/%s?per_page=100", repo.Owner, repo.Name, sha)
+	if err := c.do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+		return nil, err
+	}
+	out := make([]forge.CommitStatus, 0, len(batch))
+	for _, st := range batch {
+		out = append(out, forge.CommitStatus{
+			Context: st.Context, State: st.State, TargetURL: st.TargetURL,
+			Description: st.Description, UpdatedAt: st.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
 // ChangedFiles implements forge.Forge.
 func (c *Client) ChangedFiles(ctx context.Context, repo forge.Repo, number int) ([]forge.ChangedFile, error) {
 	var out []forge.ChangedFile

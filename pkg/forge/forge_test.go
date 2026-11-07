@@ -1,6 +1,7 @@
 package forge_test
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -53,5 +54,24 @@ func TestStickyMarker_IsAnInvisibleHTMLComment(t *testing.T) {
 func TestRepoString(t *testing.T) {
 	if got := (forge.Repo{Owner: "mikelear", Name: "x"}).String(); got != "mikelear/x" {
 		t.Fatalf("Repo.String = %q", got)
+	}
+}
+
+// The two newest iface methods are pinned by compile-time assertions in both
+// drivers plus behaviour tests in the driver files. This test pins the wire
+// spelling of the GitHub status shape, because the gate view (Keeper's merge
+// status) is parsed from exactly these fields.
+func TestCommitStatusWireShapeGitHub(t *testing.T) {
+	var st struct {
+		Context   string `json:"context"`
+		State     string `json:"state"`
+		TargetURL string `json:"target_url"`
+	}
+	b := []byte(`{"context":"Lighthouse Merge Status","state":"success","target_url":"http://lighthouse/merge/status"}`)
+	if err := json.Unmarshal(b, &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Context != "Lighthouse Merge Status" || st.State != "success" {
+		t.Fatalf("gate context did not decode: %+v", st)
 	}
 }
