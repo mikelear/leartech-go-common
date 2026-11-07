@@ -354,3 +354,17 @@ func TestServiceClient_NoTargetAudience_OmitsAudienceParam(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got, "no TargetAudience → no audience param on the mint")
 }
+
+// TestOutboundScopes_OverrideWins pins the minted token's requested scopes:
+// OutboundScopes replaces the default internal-services set, so a callee that
+// authorises on capability scopes accepts the mint.
+func TestOutboundScopes_OverrideWins(t *testing.T) {
+	got := outboundScopes(Config{OutboundScopes: []string{"a", "b"}})
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("override ignored: %v", got)
+	}
+	def := outboundScopes(Config{})
+	if len(def) != 1 || def[0] != string(ScopeInternalServices) {
+		t.Fatalf("default changed: %v", def)
+	}
+}

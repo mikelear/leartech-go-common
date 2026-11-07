@@ -57,6 +57,11 @@ type Config struct {
 	// hardening (A1): a mis-configured audience must fail-closed at boot,  proven-by: TestNewServiceClient_FailsClosedOnMissingConfig
 	// never fail-open at runtime.  proven-by: TestNewServiceClient_NoNoopFallback
 	Audience string `env:"LEARTECH_AUTH_AUDIENCE" yaml:"audience"`
+	// OutboundScopes overrides the scopes requested on MINTED
+	// client_credentials tokens. Empty = the historical single
+	// leartechapi.internal_services scope. Set when the callee authorises on
+	// capability scopes the default mint does not carry.
+	OutboundScopes []string `env:"LEARTECH_AUTH_OUTBOUND_SCOPES" envSeparator:"," yaml:"outboundScopes"`
 	// RequiredScopes is the config-driven required scope(s) for inbound s2s
 	// routes, checked via RequireScopes(NewScopes(cfg.RequiredScopes)). Keeps
 	// external/partner scopes config, not code (vs the hard-coded HasInternal-
