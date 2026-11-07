@@ -2,8 +2,8 @@
 // browser.
 //
 // WHY IT EXISTS. A browser SPA that wants a streamed, bidirectional channel to a
-// Go service hits two walls that SSE does not clear: EventSource cannot send an
-// Authorization header (so the bearer has nowhere to go), and it is one-way.
+// Go service hits two walls that SSE does not clear — a browser EventSource
+// carries no Authorization header, and it is one-way.
 // Every leartech service that streams to a browser — the Ship Proven web
 // console via leartech-console-api first — would otherwise re-solve the same
 // three problems: authenticate the handshake with the estate's Verifier, pump
@@ -44,9 +44,9 @@ type Verifier interface {
 // frames back; it never sees the raw socket.
 type Conn struct {
 	// Subject is the verified `sub` of the handshake token — who this
-	// connection speaks for. Taken from the token, never from the client, for
-	// the same reason ba-service mints session ids server-side: a connection
-	// that named its own subject could speak for anyone.
+	// connection speaks for. Set from the verified token's sub, not from
+	// anything the client sends.
+	// proven-by: TestHandler_AcceptsAValidTokenAndBindsTheSubject
 	Subject string
 	// Claims is the full validated claim set, for a service that gates on scope
 	// or reads tenant/role.
@@ -54,7 +54,7 @@ type Conn struct {
 
 	// Bearer is the validated handshake token, kept so a service that mints a
 	// DOWNSTREAM credential on the user's behalf (e.g. console-api minting a
-	// per-session gateway key) can present it. Never sent back to the client.
+	// per-session gateway key) can present it. Not included in any ServerFrame.
 	Bearer string
 
 	ws *websocket.Conn
@@ -114,10 +114,9 @@ type Handler func(ctx context.Context, conn *Conn)
 // the handshake, and runs h with an authenticated Conn.
 //
 // AUTHENTICATION IS AT THE HANDSHAKE, BEFORE ANY APPLICATION FRAME. The bearer
-// arrives either as the `Authorization: Bearer` header (non-browser clients) or,
-// because browsers cannot set that header on a WebSocket, as the single
-// `Sec-WebSocket-Protocol` value `bearer.<token>` — the one header a browser
-// WebSocket CAN influence. Either way it is decoded and validated by the
+// arrives either as the `Authorization: Bearer` header (non-browser clients) or
+// as a `bearer.<token>` `Sec-WebSocket-Protocol` value (the subprotocol header,
+// which a browser WebSocket can set). Either way it is decoded and validated by the
 // Verifier before the upgrade completes; a missing or bad token is a 401 and no
 // socket is opened.
 //
