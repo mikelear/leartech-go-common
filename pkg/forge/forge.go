@@ -72,6 +72,7 @@ type Comment struct {
 	Body        string
 	AuthorLogin string
 	HTMLURL     string
+	CreatedAt   string
 }
 
 // PullRequest is the subset of PR fields the estate's consumers use. Number and

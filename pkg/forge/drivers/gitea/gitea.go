@@ -98,16 +98,17 @@ func statusError(code int, body []byte) error {
 }
 
 type gtComment struct {
-	ID      int64  `json:"id"`
-	Body    string `json:"body"`
-	HTMLURL string `json:"html_url"`
-	User    struct {
+	ID        int64  `json:"id"`
+	Body      string `json:"body"`
+	HTMLURL   string `json:"html_url"`
+	CreatedAt string `json:"created_at"`
+	User      struct {
 		Login string `json:"login"`
 	} `json:"user"`
 }
 
 func (g gtComment) toForge() forge.Comment {
-	return forge.Comment{ID: g.ID, Body: g.Body, HTMLURL: g.HTMLURL, AuthorLogin: g.User.Login}
+	return forge.Comment{ID: g.ID, Body: g.Body, HTMLURL: g.HTMLURL, AuthorLogin: g.User.Login, CreatedAt: g.CreatedAt}
 }
 
 // ListIssueComments implements forge.Forge.
