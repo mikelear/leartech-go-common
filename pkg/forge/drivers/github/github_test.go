@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/mikelear/leartech-go-common/pkg/forge"
@@ -349,5 +351,56 @@ func TestCompareRefs(t *testing.T) {
 	}
 	if len(cmp.Files) != 1 || cmp.Files[0].Path != "a.go" {
 		t.Fatalf("files: %+v", cmp.Files)
+	}
+}
+
+func TestListOpenPRs_PaginatesAndMaps(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Query().Get("state") != "open" {
+			t.Errorf("state = %q, want open", r.URL.Query().Get("state"))
+		}
+		if r.URL.Query().Get("page") == "1" {
+			full := make([]string, 100)
+			for i := range full {
+				full[i] = fmt.Sprintf(`{"number":%d,"title":"pr","head":{"ref":"b%d","sha":"s%d"},"base":{"ref":"main","sha":"b"}}`, i, i, i)
+			}
+			w.Write([]byte("[" + strings.Join(full, ",") + "]"))
+			return
+		}
+		w.Write([]byte(`[{"number":42,"title":"last","html_url":"u","head":{"ref":"tail","sha":"ts"},"base":{"ref":"main","sha":"b"}}]`))
+	}))
+	defer srv.Close()
+
+	c := github.New(srv.URL, "tok", srv.Client())
+	out, err := c.ListOpenPRs(context.Background(), forge.Repo{Owner: "o", Name: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 pages, got %d", calls)
+	}
+	if len(out) != 101 || out[100].Number != 42 || out[100].HeadBranch != "tail" || out[100].HTMLURL != "u" {
+		t.Fatalf("mapping wrong: %+v", out[100])
+	}
+}
+
+func TestCommitStatuses_MapsGateContext(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/statuses/sha" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.Write([]byte(`[{"context":"Lighthouse Merge Status","state":"success","target_url":"http://l/merge/status","description":"Merge safe","updated_at":"2026-01-01T00:00:00Z"}]`))
+	}))
+	defer srv.Close()
+
+	c := github.New(srv.URL, "tok", srv.Client())
+	out, err := c.CommitStatuses(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "sha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].Context != "Lighthouse Merge Status" || out[0].State != "success" {
+		t.Fatalf("gate context did not map: %+v", out)
 	}
 }

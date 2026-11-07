@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -268,5 +269,53 @@ func TestHeadSHAAndCompareRefs(t *testing.T) {
 	cmp, err := c.CompareRefs(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "a", "b")
 	if err != nil || cmp.AheadBy != 1 || len(cmp.Files) != 1 {
 		t.Fatalf("%+v %v", cmp, err)
+	}
+}
+
+func TestListOpenPRs_PaginatesAndMaps(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Query().Get("page") == "1" {
+			full := make([]string, 50)
+			for i := range full {
+				full[i] = fmt.Sprintf(`{"number":%d,"title":"pr","head":{"ref":"b%d","sha":"s%d"},"base":{"ref":"main","sha":"b"}}`, i, i, i)
+			}
+			w.Write([]byte("[" + strings.Join(full, ",") + "]"))
+			return
+		}
+		w.Write([]byte(`[{"number":7,"title":"last","html_url":"u","head":{"ref":"tail","sha":"ts"},"base":{"ref":"main","sha":"b"}}]`))
+	}))
+	defer srv.Close()
+
+	c := gitea.New(srv.URL, "tok", srv.Client())
+	out, err := c.ListOpenPRs(context.Background(), forge.Repo{Owner: "o", Name: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 pages, got %d", calls)
+	}
+	if len(out) != 51 || out[50].Number != 7 || out[50].HeadBranch != "tail" {
+		t.Fatalf("mapping wrong: %+v", out[50])
+	}
+}
+
+func TestCommitStatuses_MapsGateContext(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/o/r/statuses/sha" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.Write([]byte(`[{"context":"Lighthouse Merge Status","status":"success","target_url":"http://l/merge/status","updated_at":"2026-01-01T00:00:00Z"}]`))
+	}))
+	defer srv.Close()
+
+	c := gitea.New(srv.URL, "tok", srv.Client())
+	out, err := c.CommitStatuses(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "sha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].Context != "Lighthouse Merge Status" || out[0].State != "success" {
+		t.Fatalf("gate context did not map: %+v", out)
 	}
 }

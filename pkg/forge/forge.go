@@ -101,6 +101,17 @@ type PullRequest struct {
 	HTMLURL string
 }
 
+// CommitStatus is one commit status on a SHA (the gate view Keeper reports
+// through the forge, distinct from CI check-runs). State is the forge's word
+// (success/failure/pending/error).
+type CommitStatus struct {
+	Context     string
+	State       string
+	TargetURL   string
+	Description string
+	UpdatedAt   string
+}
+
 // OpenPROptions is the input to EnsurePR.
 type OpenPROptions struct {
 	Repo  Repo
@@ -198,6 +209,13 @@ type Forge interface {
 	//
 	// proven-by: TestFindPRByHead_AllSurfacesMerged
 	FindPRByHead(ctx context.Context, repo Repo, head string, state PRState) (PullRequest, error)
+
+	// ListOpenPRs returns every open PR on the repo, newest first, following
+	// pagination. This is the "what's in flight right now" view.
+	ListOpenPRs(ctx context.Context, repo Repo) ([]PullRequest, error)
+
+	// CommitStatuses returns the commit statuses on sha (the gate view).
+	CommitStatuses(ctx context.Context, repo Repo, sha string) ([]CommitStatus, error)
 
 	// ChangedFiles returns the files in a PR's diff, following pagination.
 	ChangedFiles(ctx context.Context, repo Repo, number int) ([]ChangedFile, error)

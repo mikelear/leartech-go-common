@@ -43,6 +43,14 @@ func (f *fakeForge) UpdateIssueComment(_ context.Context, _ forge.Repo, id int64
 	}
 	return forge.Comment{}, forge.ErrNotFound
 }
+func (f *fakeForge) ListOpenPRs(context.Context, forge.Repo) ([]forge.PullRequest, error) {
+	return nil, nil
+}
+
+func (f *fakeForge) CommitStatuses(context.Context, forge.Repo, string) ([]forge.CommitStatus, error) {
+	return nil, nil
+}
+
 func (f *fakeForge) GetPullRequest(context.Context, forge.Repo, int) (forge.PullRequest, error) {
 	return forge.PullRequest{}, nil
 }
