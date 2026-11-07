@@ -404,3 +404,17 @@ func TestCommitStatuses_MapsGateContext(t *testing.T) {
 		t.Fatalf("gate context did not map: %+v", out)
 	}
 }
+
+func TestListIssueComments_MapsCreatedAt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`[{"id":1,"body":"b","created_at":"2026-01-02T03:04:05Z"}]`))
+	}))
+	defer srv.Close()
+	out, err := github.New(srv.URL, "tok", srv.Client()).ListIssueComments(context.Background(), forge.Repo{Owner: "o", Name: "r"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out[0].CreatedAt != "2026-01-02T03:04:05Z" {
+		t.Fatalf("CreatedAt = %q", out[0].CreatedAt)
+	}
+}
