@@ -258,7 +258,7 @@ func TestHeadSHAAndCompareRefs(t *testing.T) {
 				"files":[{"filename":"a","status":"added","additions":1,"deletions":0}]}`))
 			return
 		}
-		w.Write([]byte(`{"sha":"deadbeef"}`))
+		w.Write([]byte(`[{"sha":"deadbeef"}]`))
 	}))
 	defer srv.Close()
 	c := gitea.New(srv.URL, "t", srv.Client())

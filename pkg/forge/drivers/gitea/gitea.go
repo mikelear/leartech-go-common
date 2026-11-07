@@ -422,19 +422,21 @@ func (c *Client) HeadSHA(ctx context.Context, repo forge.Repo, ref string) (stri
 	if ref == "" {
 		ref = "HEAD"
 	}
-	// Gitea's commit endpoint is /git/commits/{sha}; a branch name is not a sha,
-	// so resolve the branch first via /branches/{name} when the ref is not a sha.
-	var out struct {
+	// /commits?sha= returns a LIST of commits (newest first), so the reply
+	// decodes as an array — found live against Forgejo: the struct decode
+	// failed on every call and no unit test caught it because the fakes
+	// mirrored the same wrong shape.
+	var out []struct {
 		SHA string `json:"sha"`
 	}
 	path := fmt.Sprintf("/repos/%s/%s/commits?limit=1&sha=%s", repo.Owner, repo.Name, ref)
 	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return "", err
 	}
-	if out.SHA == "" {
+	if len(out) == 0 || out[0].SHA == "" {
 		return "", fmt.Errorf("%w: no commit at ref %q in %s", forge.ErrNotFound, ref, repo)
 	}
-	return out.SHA, nil
+	return out[0].SHA, nil
 }
 
 // CompareRefs implements forge.Forge.
