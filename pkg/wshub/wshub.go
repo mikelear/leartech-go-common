@@ -41,7 +41,7 @@ type Verifier interface {
 
 // Conn is one authenticated client connection, bound to the subject the
 // handshake proved. The service reads messages the browser sent and writes
-// frames back; it never sees the raw socket.
+// frames back through the methods below; the raw *websocket.Conn stays unexported.
 type Conn struct {
 	// Subject is the verified `sub` of the handshake token — who this
 	// connection speaks for. Set from the verified token's sub, not from
