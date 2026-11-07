@@ -7,6 +7,7 @@ toolchain go1.27.3
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.1
 	github.com/alicebob/miniredis/v2 v2.39.0
+	github.com/coder/websocket v1.8.15
 	github.com/gin-gonic/gin v1.10.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/redis/go-redis/v9 v9.8.0
