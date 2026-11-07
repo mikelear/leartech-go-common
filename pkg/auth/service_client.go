@@ -46,6 +46,18 @@ type ServiceClient struct {
 	audSources map[string]oauth2.TokenSource
 }
 
+// outboundScopes resolves the scopes a minted token requests.
+// Default is the internal-services vocabulary; OutboundScopes overrides for
+// callers whose callee gates on capability scopes (e.g. leartechapi:mcp:read)
+// that the default token does not carry.
+// proven-by: TestOutboundScopes_OverrideWins
+func outboundScopes(cfg Config) []string {
+	if len(cfg.OutboundScopes) > 0 {
+		return cfg.OutboundScopes
+	}
+	return []string{string(ScopeInternalServices)}
+}
+
 // NewServiceClient creates a ServiceAuthClient that authenticates with Hydra
 // and validates incoming JWTs via JWKS.
 //
@@ -59,18 +71,6 @@ type ServiceClient struct {
 //   - Callers cannot ignore the error and end up with an unauthenticated  proven-by: TestNewServiceClient_NoNoopFallback
 //     service: the returned client validates JWKS signatures and RFC 8707
 //     audience binding on every request.
-// outboundScopes resolves the scopes a minted token requests.
-// Default is the internal-services vocabulary; OutboundScopes overrides for
-// callers whose callee gates on capability scopes (e.g. leartechapi:mcp:read)
-// that the default token does not carry.
-// proven-by: TestOutboundScopes_OverrideWins
-func outboundScopes(cfg Config) []string {
-	if len(cfg.OutboundScopes) > 0 {
-		return cfg.OutboundScopes
-	}
-	return []string{string(ScopeInternalServices)}
-}
-
 func NewServiceClient(ctx context.Context, cfg Config) (ServiceAuthClient, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
