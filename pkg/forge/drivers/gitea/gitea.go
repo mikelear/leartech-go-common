@@ -107,7 +107,7 @@ type gtComment struct {
 }
 
 func (g gtComment) toForge() forge.Comment {
-	return forge.Comment{ID: g.ID, Body: g.Body, HTMLURL: g.HTMLURL, AuthorLogin: g.User.Login}
+	return forge.Comment{ID: g.ID, Body: g.Body, HTMLURL: g.HTMLURL, AuthorLogin: g.User.Login, CreatedAt: g.CreatedAt}
 }
 
 // ListIssueComments implements forge.Forge.

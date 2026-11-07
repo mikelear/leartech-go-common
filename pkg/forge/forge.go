@@ -72,6 +72,9 @@ type Comment struct {
 	Body        string
 	AuthorLogin string
 	HTMLURL     string
+	// CreatedAt is the comment's timestamp (RFC3339). The timeline derivation
+	// in the jx3_flow MCP reads the newest ai-review comment's time from it.
+	CreatedAt string
 }
 
 // PullRequest is the subset of PR fields the estate's consumers use. Number and
