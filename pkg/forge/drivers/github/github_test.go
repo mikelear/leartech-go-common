@@ -418,3 +418,37 @@ func TestListIssueComments_MapsCreatedAt(t *testing.T) {
 		t.Fatalf("CreatedAt = %q", out[0].CreatedAt)
 	}
 }
+
+func TestAdminSurface_UserAndRepoCreate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/user" && r.Method == "GET":
+			w.Write([]byte(`{"login":"the-owner"}`))
+		case r.URL.Path == "/user/repos" && r.Method == "POST":
+			w.Write([]byte(`{"full_name":"the-owner/new-repo"}`))
+		case r.URL.Path == "/orgs/acme/repos" && r.Method == "POST":
+			w.Write([]byte(`{"full_name":"acme/new-repo"}`))
+		case r.URL.Path == "/repos/o/r/collaborators/bot" && r.Method == "PUT":
+			w.WriteHeader(204)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	c := github.New(srv.URL, "tok", srv.Client())
+	who, err := c.AuthenticatedUser(context.Background())
+	if err != nil || who != "the-owner" {
+		t.Fatalf("who=%q err=%v", who, err)
+	}
+	repo, err := c.CreateUserRepo(context.Background(), "new-repo", "d", true, true)
+	if err != nil || repo.Owner != "the-owner" || repo.Name != "new-repo" {
+		t.Fatalf("repo=%+v err=%v", repo, err)
+	}
+	orgRepo, err := c.CreateOrgRepo(context.Background(), "acme", "new-repo", "d", true, true)
+	if err != nil || orgRepo.Owner != "acme" {
+		t.Fatalf("orgRepo=%+v err=%v", orgRepo, err)
+	}
+	if err := c.AddCollaborator(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "bot", "push"); err != nil {
+		t.Fatal(err)
+	}
+}

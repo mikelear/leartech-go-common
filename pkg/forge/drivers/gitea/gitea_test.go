@@ -3,8 +3,10 @@ package gitea_test
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -317,5 +319,36 @@ func TestCommitStatuses_MapsGateContext(t *testing.T) {
 	}
 	if len(out) != 1 || out[0].Context != "Lighthouse Merge Status" || out[0].State != "success" {
 		t.Fatalf("gate context did not map: %+v", out)
+	}
+}
+
+func TestAdminSurface_PermissionVocabularyMaps(t *testing.T) {
+	var gotPerm string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/o/r/collaborators/bot" && r.Method == "PUT" {
+			b, _ := io.ReadAll(r.Body)
+			var in map[string]string
+			_ = json.Unmarshal(b, &in)
+			gotPerm = in["permission"]
+			w.WriteHeader(204)
+			return
+		}
+		if r.URL.Path == "/api/v1/user" {
+			w.Write([]byte(`{"login":"gitea-admin"}`))
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+	c := gitea.New(srv.URL, "tok", srv.Client())
+	if err := c.AddCollaborator(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "bot", "push"); err != nil {
+		t.Fatal(err)
+	}
+	if gotPerm != "write" {
+		t.Fatalf("push did not map to write, got %q", gotPerm)
+	}
+	who, err := c.AuthenticatedUser(context.Background())
+	if err != nil || who != "gitea-admin" {
+		t.Fatalf("who=%q err=%v", who, err)
 	}
 }
