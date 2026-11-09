@@ -352,3 +352,26 @@ func TestAdminSurface_PermissionVocabularyMaps(t *testing.T) {
 		t.Fatalf("who=%q err=%v", who, err)
 	}
 }
+
+func TestAdminSurface_CreateOrgRepoAndUser(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/user/repos" && r.Method == "POST":
+			w.Write([]byte(`{"full_name":"me/mine"}`))
+		case r.URL.Path == "/api/v1/orgs/it-test/repos" && r.Method == "POST":
+			w.Write([]byte(`{"full_name":"it-test/theirs"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	c := gitea.New(srv.URL, "tok", srv.Client())
+	ur, err := c.CreateUserRepo(context.Background(), "mine", "d", true, true)
+	if err != nil || ur.Owner != "me" || ur.Name != "mine" {
+		t.Fatalf("ur=%+v err=%v", ur, err)
+	}
+	or, err := c.CreateOrgRepo(context.Background(), "it-test", "theirs", "d", true, true)
+	if err != nil || or.Owner != "it-test" || or.Name != "theirs" {
+		t.Fatalf("or=%+v err=%v", or, err)
+	}
+}

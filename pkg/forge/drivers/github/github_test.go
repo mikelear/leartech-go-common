@@ -3,8 +3,10 @@ package github_test
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -450,5 +452,21 @@ func TestAdminSurface_UserAndRepoCreate(t *testing.T) {
 	}
 	if err := c.AddCollaborator(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "bot", "push"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAdminSurface_CollaboratorBody(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &got)
+		w.WriteHeader(204)
+	}))
+	defer srv.Close()
+	if err := github.New(srv.URL, "tok", srv.Client()).AddCollaborator(context.Background(), forge.Repo{Owner: "o", Name: "r"}, "bot", "maintain"); err != nil {
+		t.Fatal(err)
+	}
+	if got["permission"] != "maintain" {
+		t.Fatalf("permission body = %v", got["permission"])
 	}
 }
