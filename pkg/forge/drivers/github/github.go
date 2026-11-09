@@ -459,3 +459,57 @@ func (c *Client) CompareRefs(ctx context.Context, repo forge.Repo, base, head st
 	}
 	return cmp, nil
 }
+
+// ── AdminForge surface ─────────────────────────────────────────────
+
+// AuthenticatedUser implements AdminForge.
+func (c *Client) AuthenticatedUser(ctx context.Context) (string, error) {
+	var out struct {
+		Login string `json:"login"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/user", nil, &out); err != nil {
+		return "", err
+	}
+	return out.Login, nil
+}
+
+// CreateUserRepo implements AdminForge.
+func (c *Client) CreateUserRepo(ctx context.Context, name, description string, private, autoInit bool) (forge.Repo, error) {
+	var out struct {
+		FullName string `json:"full_name"`
+	}
+	body := map[string]any{"name": name, "description": description, "private": private, "auto_init": autoInit}
+	if err := c.do(ctx, http.MethodPost, "/user/repos", body, &out); err != nil {
+		return forge.Repo{}, err
+	}
+	owner, n, ok := strings.Cut(out.FullName, "/")
+	if !ok {
+		return forge.Repo{}, fmt.Errorf("github: create repo: unexpected full_name %q", out.FullName)
+	}
+	return forge.Repo{Owner: owner, Name: n}, nil
+}
+
+// CreateOrgRepo implements AdminForge.
+func (c *Client) CreateOrgRepo(ctx context.Context, org, name, description string, private, autoInit bool) (forge.Repo, error) {
+	var out struct {
+		FullName string `json:"full_name"`
+	}
+	body := map[string]any{"name": name, "description": description, "private": private, "auto_init": autoInit}
+	path := fmt.Sprintf("/orgs/%s/repos", org)
+	if err := c.do(ctx, http.MethodPost, path, body, &out); err != nil {
+		return forge.Repo{}, err
+	}
+	owner, n, ok := strings.Cut(out.FullName, "/")
+	if !ok {
+		return forge.Repo{}, fmt.Errorf("github: create org repo: unexpected full_name %q", out.FullName)
+	}
+	return forge.Repo{Owner: owner, Name: n}, nil
+}
+
+// AddCollaborator implements AdminForge. GitHub accepts the permission on the
+// PUT body; the invitation is pending until accepted.
+func (c *Client) AddCollaborator(ctx context.Context, repo forge.Repo, username, permission string) error {
+	path := fmt.Sprintf("/repos/%s/%s/collaborators/%s", repo.Owner, repo.Name, username)
+	body := map[string]any{"permission": permission}
+	return c.do(ctx, http.MethodPut, path, body, nil)
+}
