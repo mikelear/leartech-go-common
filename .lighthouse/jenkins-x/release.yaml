@@ -123,7 +123,7 @@ spec:
             else
               echo "==> CLUSTER_ID=${CLUSTER_ID:-unknown}; gcp tags for all clusters. Version computed cleanly: v${VERSION}."
             fi
-        - image: alpine/k8s:1.37.1
+        - image: alpine/k8s:1.37.2
           name: trigger-renovate
           resources: {}
           script: |
