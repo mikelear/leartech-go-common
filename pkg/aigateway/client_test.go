@@ -284,6 +284,48 @@ func TestCorrelate_StampsTheSessionHeader(t *testing.T) {
 	}
 }
 
+func TestCorrelateGroup_StampsTheCorrelationHeader(t *testing.T) {
+	var gotGroup, gotSession string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotGroup = r.Header.Get(headerCorrelationID)
+		gotSession = r.Header.Get(headerSessionID)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, testToken, srv.Client()).
+		Correlate(func() (string, string) { return "sess-xyz-1", CorrelateSession }).
+		CorrelateGroup("project-ftx-2026")
+	if _, err := c.ListKeys(context.Background()); err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	if gotGroup != "project-ftx-2026" {
+		t.Errorf("%s = %q, want the group id", headerCorrelationID, gotGroup)
+	}
+	if gotSession != "sess-xyz-1" {
+		t.Errorf("%s = %q, want the session id kept alongside", headerSessionID, gotSession)
+	}
+}
+
+func TestCorrelateGroup_AnEmptyIDIsNotSent(t *testing.T) {
+	var present bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, present = r.Header[headerCorrelationID]
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, testToken, srv.Client()).CorrelateGroup("")
+	if _, err := c.ListKeys(context.Background()); err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	if present {
+		t.Errorf("%s was sent for an empty group id, want absent", headerCorrelationID)
+	}
+}
+
 // ONE BUILDER, AND THE DIVERGENCE IT REMOVES.
 //
 // Chat went through do and ChatStream built its own request. They drifted

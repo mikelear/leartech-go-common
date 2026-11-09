@@ -41,10 +41,11 @@ var (
 
 // Client talks to the gateway's admin API as one bearer credential.
 type Client struct {
-	base      string
-	token     string
-	http      *http.Client
-	correlate func() (value, kind string)
+	base          string
+	token         string
+	http          *http.Client
+	correlate     func() (value, kind string)
+	correlationID string
 }
 
 // New returns a Client presenting token at base.
@@ -74,6 +75,11 @@ func New(base, token string, h *http.Client) *Client {
 const (
 	headerRunID     = "X-Leartech-Run-Id"
 	headerSessionID = "X-Leartech-Session-Id"
+
+	// headerCorrelationID groups related units of work that each carry their
+	// own run or session id. ADDITIVE, not an alternative to those two: a
+	// caller sets it as well, not instead.
+	headerCorrelationID = "X-Leartech-Correlation-Id"
 )
 
 // Correlate stamps the caller's join keys on every request from id().
@@ -101,6 +107,22 @@ func (c *Client) Correlate(id func() (value, kind string)) *Client {
 	return c
 }
 
+// CorrelateGroup sets the correlation id grouping this caller's unit of work
+// with related units -- a Project's research and the Plan it produces, a
+// shell session and the sub-tasks it spawns. It rides ALONGSIDE the run or
+// session id, not instead of it, so a reader can both tie a unit to its
+// group and keep the unit itself distinct.
+//
+// Empty leaves the header absent, which is the normal case for work that
+// stands alone.
+//
+// proven-by: TestCorrelateGroup_StampsTheCorrelationHeader
+// proven-by: TestCorrelateGroup_AnEmptyIDIsNotSent
+func (c *Client) CorrelateGroup(id string) *Client {
+	c.correlationID = id
+	return c
+}
+
 // stamp sets the correlation header when one is configured and non-empty.
 //
 // AN EMPTY STRING IS NOT A CORRELATION ID. A session that failed to
@@ -124,6 +146,15 @@ func (c *Client) stamp(h http.Header) {
 		h.Set(headerSessionID, value)
 	case CorrelateRun:
 		h.Set(headerRunID, value)
+	}
+}
+
+// stampGroup sets the correlation-group header when one is configured. Split
+// from stamp because the group id is additive and independent of the
+// run/session kind -- it is sent even when no run or session is correlated.
+func (c *Client) stampGroup(h http.Header) {
+	if c.correlationID != "" {
+		h.Set(headerCorrelationID, c.correlationID)
 	}
 }
 
@@ -254,6 +285,7 @@ func (c *Client) newRequest(ctx context.Context, method, path, accept string, bo
 		req.Header.Set("Content-Type", "application/json")
 	}
 	c.stamp(req.Header)
+	c.stampGroup(req.Header)
 	return req, nil
 }
 

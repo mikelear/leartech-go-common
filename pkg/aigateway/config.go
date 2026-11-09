@@ -37,6 +37,11 @@ const (
 	// EnvSessionID is the interactive analogue, set by a client that holds
 	// a registered session rather than executing a run.
 	EnvSessionID = "LEARTECH_SESSION_ID"
+
+	// EnvCorrelationID groups this unit of work with related ones. It is
+	// ADDITIVE to run/session -- a caller may set it alongside either, so
+	// unlike those two it is never part of the "exactly one" rule below.
+	EnvCorrelationID = "LEARTECH_CORRELATION_ID"
 )
 
 // providerEnv are the provider-native variables this package REFUSES to run
@@ -91,6 +96,11 @@ type Config struct {
 	// gateway to decide which is authoritative.
 	RunID     string
 	SessionID string
+
+	// CorrelationID groups this unit of work with related units that each
+	// carry their own run or session id. Optional and additive: a caller may
+	// set it with either RunID or SessionID, or on its own.
+	CorrelationID string
 }
 
 // ErrProviderEnv is returned when provider-native configuration is present.
@@ -124,11 +134,12 @@ func LoadConfig(env func(string) string) (Config, error) {
 	}
 
 	c := Config{
-		URL:       get(EnvURL),
-		APIKey:    get(EnvAPIKey),
-		Model:     get(EnvModel),
-		RunID:     get(EnvRunID),
-		SessionID: get(EnvSessionID),
+		URL:           get(EnvURL),
+		APIKey:        get(EnvAPIKey),
+		Model:         get(EnvModel),
+		RunID:         get(EnvRunID),
+		SessionID:     get(EnvSessionID),
+		CorrelationID: get(EnvCorrelationID),
 	}
 
 	// WRAPPED IN ErrNoCredential, WHICH IS WHAT AN INCOMPLETE ENVIRONMENT
@@ -186,6 +197,9 @@ func providerEnvSet(env func(string) string) []string {
 // proven-by: TestConfigClient_WithNeitherSendsNoCorrelation
 func (c Config) Client(h *http.Client) *Client {
 	cl := New(c.URL, c.APIKey, h)
+	if c.CorrelationID != "" {
+		cl = cl.CorrelateGroup(c.CorrelationID)
+	}
 	switch {
 	case c.RunID != "":
 		id := c.RunID
