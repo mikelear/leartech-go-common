@@ -38,9 +38,9 @@ const (
 	// a registered session rather than executing a run.
 	EnvSessionID = "LEARTECH_SESSION_ID"
 
-	// EnvCorrelationID groups this unit of work with related ones. It is
-	// ADDITIVE to run/session -- a caller may set it alongside either, so
-	// unlike those two it is never part of the "exactly one" rule below.
+	// EnvCorrelationID groups this unit of work with related ones. Additive
+	// to run/session: a caller may set it alongside either, so it sits
+	// outside the "exactly one" rule below.
 	EnvCorrelationID = "LEARTECH_CORRELATION_ID"
 )
 
