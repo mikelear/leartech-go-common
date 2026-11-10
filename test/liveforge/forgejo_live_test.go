@@ -65,8 +65,11 @@ func createRepo(t *testing.T, f forge.Forge, name string) forge.Repo {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "token "+*forgeToken)
 	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
-	if err != nil || resp.StatusCode >= 300 {
-		t.Fatalf("create repo: %v %s", err, resp.Status)
+	if err != nil {
+		t.Fatalf("create repo: %v (no response — transport-level failure)", err)
+	}
+	if resp.StatusCode >= 300 {
+		t.Fatalf("create repo: HTTP %s", resp.Status)
 	}
 	_ = resp.Body.Close()
 	return forge.Repo{Owner: *itOrg, Name: name}
